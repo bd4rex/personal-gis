@@ -3,262 +3,432 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>个人 GIS MVP - 江苏 / 安徽</title>
-    <link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet" />
-    <style>
-      html,
-      body,
-      #map {
-        height: 100%;
-        margin: 0;
-      }
-
-      body {
-        font-family: "Microsoft YaHei", Arial, sans-serif;
-        color: #17201a;
-      }
-
-      .panel {
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        z-index: 2;
-        width: min(360px, calc(100vw - 24px));
-        background: rgba(255, 255, 255, 0.94);
-        border: 1px solid #d6ded8;
-        border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(25, 42, 31, 0.16);
-        padding: 12px;
-      }
-
-      .panel h1 {
-        margin: 0 0 8px;
-        font-size: 18px;
-        line-height: 1.3;
-      }
-
-      .panel p {
-        margin: 0 0 10px;
-        font-size: 13px;
-        line-height: 1.6;
-      }
-
-      .status {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 6px 10px;
-        font-size: 12px;
-      }
-
-      .status strong {
-        font-weight: 600;
-      }
-
-      .legend {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 10px;
-        font-size: 12px;
-      }
-
-      .legend span {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-      }
-
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        display: inline-block;
-      }
-
-      .dot.todo {
-        background: #d84b2a;
-      }
-
-      .dot.field {
-        background: #1f7a53;
-      }
-
-      .maplibregl-popup-content {
-        border-radius: 8px;
-        padding: 10px 12px;
-        min-width: 200px;
-      }
-
-      .popup-title {
-        font-weight: 700;
-        margin-bottom: 4px;
-      }
-
-      .popup-meta {
-        color: #4f5f55;
-        font-size: 12px;
-        margin-bottom: 6px;
-      }
-    </style>
+    <meta name="theme-color" content="#f7f6f2" />
+    <title>GISS 个人离线地图</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css" />
+    <link rel="stylesheet" href="/src/app.css?v=20260801-1" />
   </head>
   <body>
-    <div id="map"></div>
-    <section class="panel">
-      <h1>个人 GIS MVP</h1>
-      <p>范围：江苏省、安徽省。当前页面先读取本地 GeoJSON；PostGIS + Martin 启动后可接入本地矢量瓦片。</p>
-      <div class="status">
-        <strong>数据源</strong><span id="sourceStatus">data/places.geojson</span>
-        <strong>范围</strong><span>江苏 / 安徽</span>
-        <strong>点位</strong><span id="countStatus">加载中</span>
+    <div id="map" aria-label="个人离线地图"></div>
+
+    <header class="topbar">
+      <button id="panelToggle" class="icon-button" type="button" title="收起侧栏" aria-label="收起侧栏">
+        <i data-lucide="panel-left-close"></i>
+      </button>
+      <form id="searchForm" class="search" role="search">
+        <i data-lucide="search"></i>
+        <input id="searchInput" type="search" placeholder="搜索地点、兴趣点和个人记录" autocomplete="off" />
+        <button class="icon-button compact" type="submit" title="搜索" aria-label="搜索">
+          <i data-lucide="arrow-right"></i>
+        </button>
+      </form>
+      <div class="topbar-actions">
+        <button id="addPlaceButton" class="command-button primary" type="button">
+          <i data-lucide="map-pin-plus"></i><span>添加点位</span>
+        </button>
+        <button id="importGpxButton" class="command-button" type="button">
+          <i data-lucide="route"></i><span>导入 GPX</span>
+        </button>
+        <button id="routeButton" class="command-button" type="button">
+          <i data-lucide="navigation"></i><span>路线</span>
+        </button>
+        <button id="measureButton" class="icon-button" type="button" title="测距" aria-label="测距">
+          <i data-lucide="ruler"></i>
+        </button>
       </div>
-      <div class="legend">
-        <span><i class="dot todo"></i>todo</span>
-        <span><i class="dot field"></i>field</span>
+    </header>
+
+    <div id="mapShortcuts" class="map-shortcuts">
+      <div class="map-shortcut-controls" role="group" aria-label="地图快捷工具">
+        <button id="onlineMapShortcut" class="map-shortcut-button" type="button" title="在线标准地图" aria-label="在线标准地图" aria-pressed="false">
+          <i data-lucide="wifi"></i>
+        </button>
+        <button id="contourShortcut" class="map-shortcut-button" type="button" title="等高线" aria-label="等高线" aria-pressed="false">
+          <i data-lucide="mountain-snow"></i>
+        </button>
+        <button id="legendShortcut" class="map-shortcut-button" type="button" title="图例" aria-label="图例" aria-expanded="false" aria-controls="legendPopover">
+          <i data-lucide="list"></i>
+        </button>
       </div>
-    </section>
+      <aside id="legendPopover" class="legend-popover" aria-label="地图图例" hidden>
+        <header>
+          <strong>图例</strong>
+          <button id="legendCloseButton" class="icon-button compact" type="button" title="关闭图例" aria-label="关闭图例">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <div class="legend-grid">
+          <span><i class="swatch water"></i>水域</span>
+          <span><i class="swatch park"></i>绿地</span>
+          <span><i class="swatch motorway"></i>高速</span>
+          <span><i class="swatch primary-road"></i>主干路</span>
+          <span><i class="swatch rail"></i>铁路</span>
+          <span><i class="swatch poi"></i>兴趣点</span>
+          <span><i class="swatch personal"></i>个人点位</span>
+          <span><i class="swatch track"></i>个人轨迹</span>
+          <span><i class="swatch terrain"></i>地形阴影</span>
+          <span><i class="swatch contours"></i>等高线</span>
+          <span><i class="swatch emergency"></i>应急设施</span>
+        </div>
+      </aside>
+    </div>
 
-    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
-    <script>
-      const bounds = [
-        [114.7, 29.3],
-        [122.1, 35.4]
-      ];
+    <aside id="sidePanel" class="side-panel" aria-label="地图工具">
+      <div class="panel-heading">
+        <div>
+          <h1>GISS</h1>
+          <p>个人离线地图</p>
+        </div>
+        <span id="systemState" class="status-badge">连接中</span>
+      </div>
 
-      const map = new maplibregl.Map({
-        container: "map",
-        bounds,
-        fitBoundsOptions: { padding: 60 },
-        maxBounds: [
-          [113.8, 28.5],
-          [123.0, 36.2]
-        ],
-        style: {
-          version: 8,
-          sources: {
-            osm: {
-              type: "raster",
-              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-              tileSize: 256,
-              attribution: "© OpenStreetMap contributors"
-            }
-          },
-          layers: [
-            {
-              id: "osm",
-              type: "raster",
-              source: "osm"
-            }
-          ]
-        }
-      });
+      <nav class="tabs" aria-label="侧栏视图">
+        <button type="button" class="tab active" data-tab="personal">我的地图</button>
+        <button type="button" class="tab" data-tab="layers">图层</button>
+        <button type="button" class="tab" data-tab="system">系统</button>
+      </nav>
 
-      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
+      <div class="panel-scroll">
+        <section class="tab-panel active" data-tab-panel="personal">
+          <div class="summary-row">
+            <button class="summary-item" type="button" data-list-filter="places">
+              <strong id="placeCount">0</strong><span>点位</span>
+            </button>
+            <button class="summary-item" type="button" data-list-filter="tracks">
+              <strong id="trackCount">0</strong><span>轨迹</span>
+            </button>
+            <div class="summary-item static"><strong id="mediaCount">0</strong><span>照片</span></div>
+          </div>
+          <div class="collection-filter-row">
+            <label for="collectionFilter">集合</label>
+            <select id="collectionFilter"><option value="all">全部个人记录</option></select>
+            <button id="manageCollectionsButton" class="icon-button compact" type="button" title="管理集合" aria-label="管理集合">
+              <i data-lucide="folder-cog"></i>
+            </button>
+          </div>
+          <div id="searchSummary" class="section-caption">最近更新</div>
+          <div id="personalList" class="personal-list" aria-live="polite"></div>
+          <div id="emptyState" class="empty-state" hidden>
+            <i data-lucide="map-pinned"></i>
+            <strong>还没有记录</strong>
+            <span>从地图上添加点位，或导入一条 GPX 轨迹。</span>
+          </div>
+        </section>
 
-      const addPlaceLayers = (sourceId, sourceLayer) => {
-        const layerBase = {
-          id: "places-circle",
-          type: "circle",
-          source: sourceId,
-          paint: {
-            "circle-radius": 8,
-            "circle-color": [
-              "match",
-              ["get", "category"],
-              "field",
-              "#1f7a53",
-              "todo",
-              "#d84b2a",
-              "#3569a8"
-            ],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#ffffff"
-          }
-        };
-        const labelBase = {
-          id: "places-label",
-          type: "symbol",
-          source: sourceId,
-          layout: {
-            "text-field": ["get", "name"],
-            "text-size": 13,
-            "text-offset": [0, 1.25],
-            "text-anchor": "top"
-          },
-          paint: {
-            "text-color": "#1c2c22",
-            "text-halo-color": "#ffffff",
-            "text-halo-width": 1.5
-          }
-        };
+        <section class="tab-panel" data-tab-panel="layers">
+          <div class="section-caption">底图样式</div>
+          <div class="segmented" role="group" aria-label="底图样式">
+            <button class="active" type="button" data-theme="standard">标准</button>
+            <button type="button" data-theme="explore">探索</button>
+          </div>
 
-        if (sourceLayer) {
-          layerBase["source-layer"] = sourceLayer;
-          labelBase["source-layer"] = sourceLayer;
-        }
+          <div class="section-caption spaced">在线地图来源</div>
+          <div class="segmented three-way" role="group" aria-label="在线地图来源">
+            <button type="button" data-online-provider="offline">离线概览</button>
+            <button type="button" data-online-provider="osm">OSM 标准</button>
+            <button type="button" data-online-provider="openfreemap">开放矢量</button>
+          </div>
 
-        map.addLayer(layerBase);
-        map.addLayer(labelBase);
+          <div class="section-caption spaced">显示内容</div>
+          <div class="layer-list">
+            <label><input type="checkbox" data-layer-toggle="land" checked /><span>地貌、水系与用地</span></label>
+            <label><input type="checkbox" data-layer-toggle="roads" checked /><span>道路、铁路与桥隧</span></label>
+            <label><input type="checkbox" data-layer-toggle="buildings" checked /><span>建筑与门牌</span></label>
+            <label><input type="checkbox" data-layer-toggle="poi" checked /><span>兴趣点与交通设施</span></label>
+            <label><input type="checkbox" data-layer-toggle="labels" checked /><span>地名与道路名</span></label>
+            <label><input type="checkbox" data-layer-toggle="personal" checked /><span>个人点位与轨迹</span></label>
+            <label><input type="checkbox" data-layer-toggle="terrain" /><span>地形阴影</span></label>
+            <label><input type="checkbox" data-layer-toggle="contours" /><span>等高线与高程标注</span></label>
+            <label><input type="checkbox" data-layer-toggle="weather" /><span>天气快照</span></label>
+            <label><input type="checkbox" data-layer-toggle="nautical" /><span>航海参考</span></label>
+            <label><input type="checkbox" data-layer-toggle="emergency" /><span>应急与补给设施</span></label>
+          </div>
 
-        map.on("click", "places-circle", (event) => {
-          const feature = event.features[0];
-          const props = feature.properties;
-          new maplibregl.Popup()
-            .setLngLat(event.lngLat)
-            .setHTML(`
-              <div class="popup-title">${props.name}</div>
-              <div class="popup-meta">${props.province || ""} · ${props.category || ""} · ${props.source || ""}</div>
-              <div>${props.note || ""}</div>
-            `)
-            .addTo(map);
-        });
+          <div id="emergencyFilters" class="emergency-filters" hidden>
+            <label><input type="checkbox" value="medical" checked /><span>医疗</span></label>
+            <label><input type="checkbox" value="security" checked /><span>救援</span></label>
+            <label><input type="checkbox" value="shelter" checked /><span>避难</span></label>
+            <label><input type="checkbox" value="supplies" checked /><span>补给</span></label>
+            <label><input type="checkbox" value="fuel" checked /><span>燃料</span></label>
+          </div>
 
-        map.on("mouseenter", "places-circle", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
+        </section>
 
-        map.on("mouseleave", "places-circle", () => {
-          map.getCanvas().style.cursor = "";
-        });
-      };
+        <section class="tab-panel" data-tab-panel="system">
+          <div class="section-caption">地图与资源</div>
+          <div class="pack-summary">
+            <span>当前</span><strong id="activePackName">--</strong><small id="packSummary">检查中</small>
+          </div>
+          <div id="regionPackList" class="region-pack-list"></div>
+          <div class="region-pack-catalog-bar">
+            <span id="availablePackSummary">检查中</span>
+            <button id="availablePacksButton" class="region-pack-add-button" type="button">
+              <i data-lucide="hard-drive-download"></i><span>管理资源</span>
+            </button>
+          </div>
+          <div class="section-caption spaced">服务与数据</div>
+          <div class="system-list">
+            <div><span>数据库</span><strong id="dbState">检查中</strong></div>
+            <div><span>矢量服务</span><strong id="martinState">检查中</strong></div>
+            <div><span>OSM 数据快照</span><strong id="mapSnapshot">--</strong></div>
+            <div><span>离线参考索引</span><strong id="referenceCount">--</strong></div>
+            <div><span>地址检索</span><strong id="geocoderState">检查中</strong></div>
+            <div><span>路线规划</span><strong id="routingState">检查中</strong></div>
+            <div><span>本地高程</span><strong id="elevationState">检查中</strong></div>
+            <div><span>离线百科</span><strong id="encyclopediaState">检查中</strong></div>
+            <div><span>最近备份</span><strong id="backupState">--</strong></div>
+            <div><span>备份策略</span><strong id="backupPolicyState">--</strong></div>
+            <div><span>底图数据源</span><strong>单一去重包</strong></div>
+            <div><span>数据版本</span><strong id="dataVersion">--</strong></div>
+          </div>
+          <a class="export-link" href="/api/export/geojson" target="_blank" rel="noreferrer">
+            <i data-lucide="download"></i><span>导出个人 GeoJSON</span>
+          </a>
+          <a class="export-link secondary" href="/api/export/gpx" target="_blank" rel="noreferrer">
+            <i data-lucide="route"></i><span>导出全部 GPX</span>
+          </a>
+          <a class="export-link secondary" href="/api/export/archive" target="_blank" rel="noreferrer">
+            <i data-lucide="package-open"></i><span>导出完整个人归档</span>
+          </a>
+          <a id="encyclopediaLink" class="export-link secondary" href="/wiki/" target="_blank" rel="noreferrer">
+            <i data-lucide="book-open"></i><span>打开离线百科</span>
+          </a>
+        </section>
+      </div>
+    </aside>
 
-      map.on("load", async () => {
-        let count = "未知";
-        try {
-          const response = await fetch("../data/places.geojson");
-          const places = await response.json();
-          count = `${places.features.length} 个`;
-        } catch {
-          count = "数据库图层";
-        }
-        document.getElementById("countStatus").textContent = count;
+    <aside id="routePanel" class="route-panel" aria-label="离线路线规划" hidden>
+      <header>
+        <div>
+          <span>离线路线</span>
+          <h2>规划行程</h2>
+        </div>
+        <button id="routeCloseButton" class="icon-button compact" type="button" title="关闭路线" aria-label="关闭路线">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <div class="segmented route-modes" role="group" aria-label="出行方式">
+        <button class="active" type="button" data-route-costing="auto"><i data-lucide="car-front"></i><span>驾车</span></button>
+        <button type="button" data-route-costing="bicycle"><i data-lucide="bike"></i><span>骑行</span></button>
+        <button type="button" data-route-costing="pedestrian"><i data-lucide="footprints"></i><span>步行</span></button>
+      </div>
+      <div class="route-points">
+        <div class="route-point-row"><i data-lucide="circle-dot"></i><span><small>起点</small><input id="routeStartLabel" type="search" aria-label="路线起点" placeholder="搜索地点或个人记录" /></span><button class="icon-button compact" type="button" data-route-search="0" title="搜索起点" aria-label="搜索起点"><i data-lucide="search"></i></button><button class="icon-button compact" type="button" data-route-point="0" title="在地图选择起点" aria-label="在地图选择起点"><i data-lucide="map-pin"></i></button></div>
+        <div class="route-point-row"><i data-lucide="map-pin"></i><span><small>终点</small><input id="routeEndLabel" type="search" aria-label="路线终点" placeholder="搜索地点或个人记录" /></span><button class="icon-button compact" type="button" data-route-search="1" title="搜索终点" aria-label="搜索终点"><i data-lucide="search"></i></button><button class="icon-button compact" type="button" data-route-point="1" title="在地图选择终点" aria-label="在地图选择终点"><i data-lucide="map-pin"></i></button></div>
+      </div>
+      <div class="route-point-tools">
+        <button class="command-button" id="routeSwapButton" type="button"><i data-lucide="arrow-up-down"></i><span>交换</span></button>
+        <button class="command-button" id="routeLocationButton" type="button"><i data-lucide="locate-fixed"></i><span>当前位置</span></button>
+      </div>
+      <div id="routeEmpty" class="route-empty"><i data-lucide="navigation"></i><span>在地图上设置起点和终点</span></div>
+      <section id="routeResult" class="route-result" hidden>
+        <div class="route-summary">
+          <strong id="routeDistance">--</strong><span id="routeDuration">--</span>
+        </div>
+        <div id="routeProfileSection" class="route-profile" hidden>
+          <div><strong>高程</strong><span id="routeElevationRange">--</span></div>
+          <canvas id="routeProfileCanvas" width="292" height="100" aria-label="路线高程剖面"></canvas>
+        </div>
+        <div id="routeManeuvers" class="route-maneuvers"></div>
+      </section>
+      <footer>
+        <button id="routeClearButton" class="command-button" type="button"><i data-lucide="rotate-ccw"></i><span>清除</span></button>
+        <button id="routeSpeakButton" class="command-button" type="button" disabled><i data-lucide="volume-2"></i><span>朗读</span></button>
+        <button id="routeSaveButton" class="command-button primary" type="button" disabled><i data-lucide="save"></i><span>保存轨迹</span></button>
+      </footer>
+    </aside>
 
-        try {
-          const tileJsonResponse = await fetch("http://localhost:3000/places_web");
-          if (!tileJsonResponse.ok) {
-            throw new Error("Martin is not available");
-          }
+    <aside id="detailPanel" class="detail-panel" aria-label="地图地物详情" hidden>
+      <header>
+        <div>
+          <span id="detailEyebrow">本地 OSM 地物</span>
+          <h2 id="detailTitle">地图详情</h2>
+          <p id="detailSubtitle"></p>
+        </div>
+        <button id="detailCloseButton" class="icon-button compact" type="button" title="关闭详情" aria-label="关闭详情">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <div id="detailProperties" class="detail-properties"></div>
+      <section id="detailMediaSection" class="detail-media-section" hidden>
+        <header><strong>照片</strong><button id="detailAddPhotoButton" class="icon-button compact" type="button" title="添加照片" aria-label="添加照片"><i data-lucide="image-plus"></i></button></header>
+        <div id="detailMediaGrid" class="detail-media-grid"></div>
+      </section>
+      <div class="detail-source"><i data-lucide="database"></i><span id="detailSourceText">OpenStreetMap 本地快照</span></div>
+      <footer>
+        <button id="detailDeleteButton" class="command-button danger" type="button" hidden>
+          <i data-lucide="trash-2"></i><span>删除</span>
+        </button>
+        <button id="detailNearbyButton" class="command-button" type="button">
+          <i data-lucide="radar"></i><span>附近地点</span>
+        </button>
+        <button id="detailSaveButton" class="command-button primary" type="button">
+          <i data-lucide="bookmark-plus"></i><span>收藏</span>
+        </button>
+      </footer>
+    </aside>
 
-          map.addSource("places", {
-            type: "vector",
-            url: "http://localhost:3000/places_web"
-          });
-          document.getElementById("sourceStatus").textContent = "PostGIS -> Martin -> MapLibre";
-          addPlaceLayers("places", "places_web");
-          return;
-        } catch {
-          document.getElementById("sourceStatus").textContent = "data/places.geojson";
-        }
+    <aside id="coveragePrompt" class="coverage-prompt" aria-live="polite" hidden>
+      <span class="coverage-prompt-icon"><i data-lucide="map-pinned"></i></span>
+      <span class="coverage-prompt-copy">
+        <strong id="coveragePromptTitle">此区域尚未离线安装</strong>
+        <span id="coveragePromptText">断网前可在资源管理中构建此区域包。</span>
+      </span>
+      <button id="coverageDownloadButton" class="command-button primary" type="button"><i data-lucide="download"></i><span>下载区域</span></button>
+      <button id="coverageCloseButton" class="icon-button compact" type="button" title="关闭提示" aria-label="关闭区域提示"><i data-lucide="x"></i></button>
+    </aside>
 
-        const response = await fetch("../data/places.geojson");
-        const places = await response.json();
+    <div id="modeBanner" class="mode-banner" hidden>
+      <span id="modeText"></span>
+      <button id="cancelModeButton" class="icon-button compact" type="button" title="取消" aria-label="取消">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
 
-        map.addSource("places", {
-          type: "geojson",
-          data: places
-        });
+    <div id="coordinateReadout" class="coordinate-readout">118.00000, 32.45000</div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-        addPlaceLayers("places");
-      });
-    </script>
+    <dialog id="resourceManagerDialog" class="editor-dialog resource-manager-dialog" aria-describedby="resourceManagerSubtitle">
+      <div class="resource-manager-shell">
+        <header class="resource-manager-header">
+          <div>
+            <h2>地图与资源</h2>
+            <p id="resourceManagerSubtitle">离线资源目录与本地存储</p>
+          </div>
+          <div class="resource-manager-actions">
+            <button id="resourceRefreshButton" class="icon-button" type="button" title="重新检查资源" aria-label="重新检查资源">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+            <button class="icon-button" type="button" data-resource-manager-close title="关闭地图与资源" aria-label="关闭地图与资源">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+        </header>
+        <nav class="resource-tabs" role="tablist" aria-label="资源视图">
+          <button class="active" type="button" role="tab" aria-selected="true" data-resource-tab="download">可获取 <span id="resourceDownloadBadge">--</span></button>
+          <button type="button" role="tab" aria-selected="false" data-resource-tab="local">本地 <span id="resourceLocalBadge">--</span></button>
+          <button type="button" role="tab" aria-selected="false" data-resource-tab="updates">可更新 <span id="resourceUpdatesBadge">--</span></button>
+        </nav>
+        <section class="resource-storage" aria-label="设备存储">
+          <div class="resource-storage-heading"><span>设备存储</span><strong id="resourceDiskFree">检查中</strong></div>
+          <div class="resource-storage-track"><span id="resourceDiskUsedBar"></span></div>
+          <div class="resource-storage-meta"><span id="resourceDiskUsed">--</span><span id="resourceManagedSize">GISS 可计量 --</span></div>
+        </section>
+        <div id="resourceManagerBody" class="resource-manager-body">
+          <aside id="resourceRegionBrowser" class="resource-region-browser" aria-label="区域目录">
+            <label id="resourceSearchWrap" class="resource-search">
+              <i data-lucide="search"></i>
+              <input id="resourceSearchInput" type="search" aria-label="搜索国家、地区或资源" placeholder="搜索国家、地区或资源" autocomplete="off" />
+            </label>
+            <nav id="resourceRegionList" class="resource-region-list" aria-label="世界区域"></nav>
+          </aside>
+          <main id="resourceManagerContent" class="resource-manager-content" aria-live="polite"></main>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="placeDialog" class="editor-dialog">
+      <form id="placeForm" method="dialog">
+        <header>
+          <div>
+            <h2 id="placeDialogTitle">添加点位</h2>
+            <p id="placeCoordinates"></p>
+          </div>
+          <button class="icon-button" type="button" data-dialog-close title="关闭" aria-label="关闭">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <input id="placeId" type="hidden" />
+        <input id="placeVersion" type="hidden" />
+        <input id="longitude" type="hidden" />
+        <input id="latitude" type="hidden" />
+        <label class="field"><span>名称</span><input id="placeName" required maxlength="200" /></label>
+        <div class="form-grid">
+          <label class="field"><span>分类</span>
+            <select id="placeCategory">
+              <option value="todo">计划</option>
+              <option value="field">实地记录</option>
+              <option value="favorite">收藏</option>
+              <option value="reference">参考</option>
+            </select>
+          </label>
+          <label class="field"><span>省份 / 地区</span><input id="placeProvince" maxlength="100" /></label>
+        </div>
+        <label class="field"><span>标签</span><input id="placeTags" placeholder="历史, 徒步, 摄影" /></label>
+        <fieldset class="collection-choice-field">
+          <legend>集合</legend>
+          <div id="placeCollectionChoices" class="collection-choices"></div>
+        </fieldset>
+        <label class="field"><span>评分</span><input id="placeRating" type="number" min="0" max="5" value="0" /></label>
+        <label class="field"><span>备注</span><textarea id="placeNote" rows="4" maxlength="10000"></textarea></label>
+        <footer>
+          <button class="command-button" type="button" data-dialog-close>取消</button>
+          <button class="command-button primary" type="submit"><i data-lucide="save"></i><span>保存</span></button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="collectionDialog" class="editor-dialog collection-dialog">
+      <form id="collectionForm" method="dialog">
+        <header>
+          <div>
+            <h2>管理集合</h2>
+            <p>集合随个人数据库一起备份</p>
+          </div>
+          <button class="icon-button" type="button" data-collection-close title="关闭集合管理" aria-label="关闭集合管理">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <div id="collectionManagerList" class="collection-manager-list"></div>
+        <input id="collectionId" type="hidden" />
+        <div class="form-grid collection-form-grid">
+          <label class="field"><span>集合名称</span><input id="collectionName" required maxlength="100" /></label>
+          <label class="field"><span>颜色</span><input id="collectionColor" type="color" value="#267352" /></label>
+        </div>
+        <label class="field"><span>说明</span><input id="collectionNote" maxlength="2000" /></label>
+        <footer>
+          <button class="command-button" type="button" data-collection-new><i data-lucide="plus"></i><span>新建</span></button>
+          <button class="command-button primary" type="submit"><i data-lucide="save"></i><span>保存集合</span></button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="trackDialog" class="editor-dialog">
+      <form id="trackForm" method="dialog">
+        <header>
+          <div><h2>编辑轨迹</h2><p id="trackSummary"></p></div>
+          <button class="icon-button" type="button" data-track-close title="关闭轨迹编辑" aria-label="关闭轨迹编辑"><i data-lucide="x"></i></button>
+        </header>
+        <input id="trackId" type="hidden" />
+        <input id="trackVersion" type="hidden" />
+        <label class="field"><span>名称</span><input id="trackName" required maxlength="200" /></label>
+        <div class="form-grid">
+          <label class="field"><span>活动类型</span>
+            <select id="trackActivity">
+              <option value="walking">步行</option><option value="hiking">徒步</option>
+              <option value="cycling">骑行</option><option value="driving">驾车</option><option value="other">其他</option>
+            </select>
+          </label>
+          <label class="field"><span>颜色</span><input id="trackColor" type="color" value="#c94532" /></label>
+        </div>
+        <label class="field"><span>标签</span><input id="trackTags" placeholder="徒步, 旅行, 记录" /></label>
+        <label class="field"><span>备注</span><textarea id="trackNote" rows="5" maxlength="10000"></textarea></label>
+        <footer>
+          <button class="command-button" type="button" data-track-close>取消</button>
+          <button class="command-button primary" type="submit"><i data-lucide="save"></i><span>保存轨迹</span></button>
+        </footer>
+      </form>
+    </dialog>
+
+    <input id="gpxInput" type="file" accept=".gpx,application/gpx+xml" hidden />
+    <input id="photoInput" type="file" accept="image/*" hidden />
+
+    <script src="/vendor/maplibre/maplibre-gl.js"></script>
+    <script src="/vendor/pmtiles/pmtiles.js"></script>
+    <script src="/vendor/maplibre-contour/index.min.js"></script>
+    <script src="/vendor/lucide/lucide.min.js"></script>
+    <script src="/src/map-style.js?v=20260801-1"></script>
+    <script type="module" src="/src/app.js?v=20260801-6"></script>
   </body>
 </html>

@@ -1,0 +1,262 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const { chromium } = require("playwright");
+
+const chromeCandidates = [
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+];
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+  || chromeCandidates.find((candidate) => fs.existsSync(candidate));
+
+const outputDir = path.resolve(__dirname, "..", "runtime", "ui-smoke");
+const baseUrl = process.env.GISS_UI_URL || "http://127.0.0.1:8080";
+fs.mkdirSync(outputDir, { recursive: true });
+
+(async () => {
+  const launchOptions = { headless: true, args: ["--no-proxy-server"] };
+  if (executablePath) launchOptions.executablePath = executablePath;
+  const browser = await chromium.launch(launchOptions);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => errors.push(`page: ${error.message}`));
+  page.on("requestfailed", (request) => {
+    const errorText = request.failure()?.errorText || "failed";
+    const isExpectedTileAbort = request.url().endsWith(".pmtiles") && errorText.includes("ERR_ABORTED");
+    const isExpectedInventoryAbort = ["/api/resources", "/api/map-packs"].some((path) => request.url().includes(path)) && errorText.includes("ERR_ABORTED");
+    if (!isExpectedTileAbort && !isExpectedInventoryAbort) errors.push(`request: ${request.url()} ${errorText}`);
+  });
+  await page.route("**/api/maintenance", async (route) => {
+    if (route.request().method() === "POST" && route.request().url().endsWith("/jobs")) {
+      const payload = route.request().postDataJSON();
+      return route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "ui-verify-job", resourceId: payload.resourceId, action: payload.action,
+          label: "上海市地图包", status: "queued"
+        })
+      });
+    }
+    if (route.request().method() !== "GET") return route.continue();
+    const now = Date.now();
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        settings: { enabled: false, resources: {} },
+        worker: { online: true, status: "running", heartbeatAt: new Date(now).toISOString() },
+        jobs: [
+          {
+            id: "ui-running-shanghai", resourceId: "shanghai", action: "update", label: "上海地图包",
+            status: "running", startedAt: new Date(now - 94000).toISOString(), requestedAt: new Date(now - 96000).toISOString(),
+            cancelRequested: false, progress: {
+              kind: "staged", percent: 68, stage: "生成地图瓦片", step: 4, steps: 5, queuePosition: null,
+              activity: { kind: "generation", rate: 1900, unit: "tiles/s", processed: 853000, processedUnit: "tiles", bytes: 470810624 }
+            }
+          },
+          {
+            id: "ui-queued-jiangsu", resourceId: "jiangsu", action: "update", label: "江苏地图包",
+            status: "queued", startedAt: null, requestedAt: new Date(now - 78000).toISOString(),
+            cancelRequested: false, progress: { kind: "queued", percent: 0, stage: "等待本机维护服务", step: 0, steps: 5, queuePosition: 1 }
+          }
+        ]
+      })
+    });
+  });
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "load" });
+  await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 90000 });
+  await page.waitForTimeout(2500);
+
+  const canvas = page.locator("canvas.maplibregl-canvas");
+  if (await canvas.count() !== 1) throw new Error("MapLibre canvas was not created.");
+  const box = await canvas.boundingBox();
+  if (!box || box.width < 1000 || box.height < 700) throw new Error("Map canvas has an unexpected size.");
+
+  const attribution = page.getByRole("link", { name: "OpenStreetMap contributors" });
+  if (await attribution.count() !== 1) throw new Error("OpenStreetMap attribution is missing.");
+  if (!(await page.locator("#modeBanner").isHidden())) throw new Error("Mode banner is visible while no tool is active.");
+
+  await page.screenshot({ path: path.join(outputDir, "desktop.png"), fullPage: false });
+
+  if (await page.locator("#collectionFilter option").count() < 4) throw new Error("Default collection filters are missing.");
+  await page.getByRole("button", { name: "管理集合" }).click();
+  await page.locator("#collectionDialog").waitFor({ state: "visible" });
+  if (await page.locator(".collection-manager-item").count() < 3) throw new Error("Collection manager did not list default collections.");
+  await page.screenshot({ path: path.join(outputDir, "collection-manager.png"), fullPage: false });
+  await page.getByRole("button", { name: "关闭集合管理" }).click();
+
+  await page.locator('[data-kind="place"]').first().click();
+  await page.locator("#detailPanel").waitFor({ state: "visible" });
+  if ((await page.locator("#detailEyebrow").textContent()) !== "我的个人点位") {
+    throw new Error("Personal place did not open the unified detail panel.");
+  }
+  if (!(await page.locator("#detailMediaSection").isVisible())) throw new Error("Personal media section is hidden.");
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: path.join(outputDir, "personal-detail.png"), fullPage: false });
+  await page.locator("#detailSaveButton").click();
+  await page.locator("#placeDialog").waitFor({ state: "visible" });
+  await page.locator("#placeDialog [data-dialog-close]").first().click({ force: true });
+  await page.getByRole("button", { name: "关闭详情" }).click();
+
+  await page.locator("#searchInput").fill("南京");
+  await page.locator("#searchInput").press("Enter");
+  await page.locator('[data-search-id]').first().waitFor({ state: "visible" });
+  const referenceResult = page.locator('[data-search-id]').filter({ hasText: "OSM 参考" }).first();
+  if (await referenceResult.count() !== 1) throw new Error("Offline OSM reference search returned no result.");
+  await referenceResult.click();
+  await page.getByRole("button", { name: "保存为个人点位" }).waitFor({ state: "visible" });
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: path.join(outputDir, "search-results.png"), fullPage: false });
+  await page.getByRole("button", { name: "保存为个人点位" }).click();
+  await page.locator("#placeDialog").waitFor({ state: "visible" });
+  if ((await page.locator("#placeDialogTitle").textContent()) !== "保存参考地点") {
+    throw new Error("Reference result did not open the copy-as-personal workflow.");
+  }
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.locator("#searchInput").fill("");
+  await page.locator("#searchInput").press("Enter");
+  await page.waitForFunction(() => document.querySelector("#searchSummary")?.textContent === "最近更新");
+  await page.waitForTimeout(500);
+
+  // The search leaves the map centered on Nanjing South; click a stable POI-dense area east of the station.
+  await page.mouse.click(1050, 275);
+  await page.locator("#detailPanel").waitFor({ state: "visible", timeout: 5000 });
+  if (!(await page.locator("#detailTitle").textContent()).trim()) throw new Error("Base-map feature detail has no title.");
+  await page.getByRole("button", { name: "附近地点" }).click();
+  await page.waitForFunction(() => document.querySelector("#searchSummary")?.textContent.includes("附近"));
+  if (await page.locator('[data-search-id]').count() < 1) throw new Error("Nearby reference lookup returned no visible results.");
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: path.join(outputDir, "feature-detail.png"), fullPage: false });
+  await page.locator("#detailSaveButton").click();
+  await page.locator("#placeDialog").waitFor({ state: "visible" });
+  if ((await page.locator("#placeDialogTitle").textContent()) !== "保存参考地点") {
+    throw new Error("Base-map feature did not open the collection workflow.");
+  }
+  if (!(await page.locator('#placeCollectionChoices input[value="default-favorites"]').isChecked())) {
+    throw new Error("Collected base-map feature did not default to the favorites collection.");
+  }
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "关闭详情" }).click();
+  await page.locator("#searchInput").press("Enter");
+  await page.waitForFunction(() => document.querySelector("#searchSummary")?.textContent === "最近更新");
+
+  await page.getByRole("button", { name: "系统" }).click();
+  const referenceCount = Number((await page.locator("#referenceCount").textContent()).replace(/\D/g, ""));
+  if (referenceCount < 100000) throw new Error("Reference index readiness count is missing or too small.");
+  if ((await page.locator("#mapSnapshot").textContent()) === "--") throw new Error("Map snapshot date is missing.");
+  if ((await page.locator("#backupState").textContent()) === "--") throw new Error("Backup readiness is missing.");
+  if (await page.locator(".region-pack-item").count() < 4) throw new Error("Region pack center did not list four province packs.");
+  if ((await page.locator("#activePackName").textContent()) !== "全部已安装区域") {
+    throw new Error("Installed regions are not displayed together by default.");
+  }
+  if (await page.locator("#viewSwitcher").count()) throw new Error("The redundant bottom region navigation is still present.");
+  const mapPackInventory = await page.evaluate(async () => {
+    const response = await fetch("/api/map-packs", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Map pack inventory returned ${response.status}.`);
+    return response.json();
+  });
+  if (mapPackInventory.provinceCount !== 34 || mapPackInventory.independentProvinceCount < 2) {
+    throw new Error("Province installation summary is incomplete.");
+  }
+  if (mapPackInventory.packs.length < 500 || mapPackInventory.packs.filter((pack) => pack.kind !== "province").length < 500) {
+    throw new Error("Global map-pack catalog is incomplete.");
+  }
+  const availableProvinceCount = mapPackInventory.provinceCount - mapPackInventory.independentProvinceCount;
+  if (!(await page.locator("#availablePackSummary").textContent()).includes(`${availableProvinceCount} 省可独立获取`)) {
+    throw new Error("Resource availability summary is missing.");
+  }
+  const resourcePage = await context.newPage();
+  await resourcePage.goto(`${baseUrl}/resources.html`, { waitUntil: "load", timeout: 90000 });
+  await resourcePage.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 5);
+  if (await resourcePage.locator("#versionRows tr[data-pack-row]").count() < 5) {
+    throw new Error("Standalone resource console does not show every installed map pack.");
+  }
+  await resourcePage.getByRole("button", { name: /本地资源/ }).click();
+  if (await resourcePage.locator(".resource-row").count() < 15) {
+    throw new Error("Standalone local resource inventory is incomplete.");
+  }
+  await resourcePage.getByRole("button", { name: /任务与更新/ }).click();
+  if (await resourcePage.locator("#updateRows .task-row").count() < 8) {
+    throw new Error("Standalone resource update checks are incomplete.");
+  }
+  await resourcePage.screenshot({ path: path.join(outputDir, "resource-console.png"), fullPage: false });
+  await resourcePage.close();
+  const verifyRequest = page.waitForRequest((request) => request.url().endsWith("/api/maintenance/jobs")
+    && request.method() === "POST" && request.postDataJSON()?.action === "verify");
+  await page.getByRole("button", { name: "校验 上海市" }).click();
+  const queuedVerification = await verifyRequest;
+  if (queuedVerification.postDataJSON()?.resourceId !== "shanghai") {
+    throw new Error("Shanghai verification did not use the maintenance queue.");
+  }
+  await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("后台队列"), null, { timeout: 30000 });
+  await page.getByRole("button", { name: "聚焦 上海市" }).click();
+  await page.waitForFunction(() => document.querySelector("#activePackName")?.textContent === "上海市");
+  await page.waitForTimeout(2200);
+  if (!(await page.getByRole("button", { name: "上海" }).count())) throw new Error("Shanghai province view was not rendered.");
+  await page.screenshot({ path: path.join(outputDir, "region-pack-center.png"), fullPage: false });
+  await page.getByRole("button", { name: "系统", exact: true }).click();
+  await page.getByRole("button", { name: "聚焦 江苏省" }).click();
+  await page.waitForFunction(() => document.querySelector("#activePackName")?.textContent === "江苏省");
+  await page.waitForTimeout(2200);
+  await page.screenshot({ path: path.join(outputDir, "system-readiness.png"), fullPage: false });
+  await page.getByRole("button", { name: "我的地图" }).click();
+
+  await page.getByRole("button", { name: "添加点位" }).click();
+  if (!(await page.locator("#modeBanner").isVisible())) throw new Error("Add-place mode banner did not appear.");
+  await page.mouse.click(900, 450);
+  const dialog = page.locator("#placeDialog");
+  await dialog.waitFor({ state: "visible" });
+  if (!(await page.locator("#placeCoordinates").textContent())) throw new Error("Place coordinates were not populated.");
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  if (!(await page.locator("#modeBanner").isHidden())) throw new Error("Closing the editor did not leave add-place mode.");
+
+  const contourShortcut = page.getByRole("button", { name: "等高线", exact: true });
+  if (await contourShortcut.count() !== 1) throw new Error("Contour shortcut is missing.");
+  await contourShortcut.click();
+  if (await contourShortcut.getAttribute("aria-pressed") !== "true") throw new Error("Contour shortcut did not enable contours.");
+
+  const legendShortcut = page.getByRole("button", { name: "图例", exact: true });
+  await legendShortcut.click();
+  if (!(await page.locator("#legendPopover").isVisible())) throw new Error("Legend shortcut did not open the legend.");
+  await page.getByRole("button", { name: "关闭图例", exact: true }).click();
+  if (!(await page.locator("#legendPopover").isHidden())) throw new Error("Legend did not close.");
+
+  await page.getByRole("button", { name: "图层" }).click();
+  await page.getByRole("button", { name: "探索" }).click();
+  await page.waitForTimeout(1800);
+  const coordinateBox = await page.locator("#coordinateReadout").boundingBox();
+  const desktopAttributionBox = await page.locator(".maplibregl-ctrl-attrib").boundingBox();
+  if (coordinateBox && desktopAttributionBox) {
+    const overlaps = coordinateBox.x < desktopAttributionBox.x + desktopAttributionBox.width
+      && coordinateBox.x + coordinateBox.width > desktopAttributionBox.x
+      && coordinateBox.y < desktopAttributionBox.y + desktopAttributionBox.height
+      && coordinateBox.y + coordinateBox.height > desktopAttributionBox.y;
+    if (overlaps) throw new Error("Coordinate readout overlaps map attribution.");
+  }
+  await page.screenshot({ path: path.join(outputDir, "desktop-explore.png"), fullPage: false });
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await page.waitForTimeout(1800);
+  const narrowBox = await page.locator("canvas.maplibregl-canvas").boundingBox();
+  if (!narrowBox || narrowBox.width !== 760 || narrowBox.height !== 900) throw new Error("Narrow viewport map is not full screen.");
+  await page.screenshot({ path: path.join(outputDir, "narrow.png"), fullPage: false });
+
+  await page.setViewportSize({ width: 560, height: 900 });
+  await page.getByRole("button", { name: "系统" }).click();
+  await page.screenshot({ path: path.join(outputDir, "system-narrow.png"), fullPage: false });
+
+  await browser.close();
+  if (errors.length) throw new Error(errors.join("\n"));
+  console.log("UI smoke test passed: map, contours, base-feature detail, nearby lookup, clustering, collection manager/assignment, readiness, editor, theme, and narrow layout.");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -1,0 +1,20 @@
+listen_addresses: 0.0.0.0:3000
+
+postgres:
+  connection_string: ${DATABASE_URL}
+  auto_publish: false
+  tables:
+    places_web:
+      schema: app
+      table: places_web
+      srid: 4326
+      geometry_column: geom
+      geometry_type: POINT
+      id_column: id
+    tracks_web:
+      schema: app
+      table: tracks_web
+      srid: 4326
+      geometry_column: geom
+      geometry_type: MULTILINESTRING
+      id_column: id

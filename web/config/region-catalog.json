@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "version": "2026-07-17-province-1",
+  "countryId": "china",
+  "countryName": "中国",
+  "unitLevel": "province",
+  "defaults": {
+    "kind": "province",
+    "minZoom": 0,
+    "maxZoom": 16,
+    "urlTemplate": "/tiles/{id}.pmtiles",
+    "manifestUrlTemplate": "/tiles/{id}.manifest.json",
+    "sourceFileTemplate": "raw/osm/china/provinces/{id}-latest.osm.pbf",
+    "polygonUrlTemplate": "https://download.openstreetmap.fr/polygons/asia/china/{id}.poly"
+  },
+  "sourceProfiles": {
+    "china-common": {
+      "mode": "extract",
+      "provider": "OpenStreetMap France",
+      "snapshotFile": "raw/osm/china/china-latest.osm.pbf",
+      "stateFile": "raw/osm/china/china.state.txt",
+      "snapshotUrl": "https://download.openstreetmap.fr/extracts/asia/china-latest.osm.pbf",
+      "stateUrl": "https://download.openstreetmap.fr/extracts/asia/china.state.txt"
+    },
+    "taiwan-geofabrik": {
+      "mode": "direct",
+      "provider": "Geofabrik",
+      "snapshotFile": "raw/osm/taiwan/taiwan-latest.osm.pbf",
+      "stateFile": "raw/osm/taiwan/taiwan.state.txt",
+      "snapshotUrl": "https://download.geofabrik.de/asia/taiwan-latest.osm.pbf",
+      "checksumUrl": "https://download.geofabrik.de/asia/taiwan-latest.osm.pbf.md5",
+      "stateUrl": "https://download.geofabrik.de/asia/taiwan-updates/state.txt",
+      "polygonUrl": "https://download.geofabrik.de/asia/taiwan.poly",
+      "sourceFile": "raw/osm/taiwan/taiwan-latest.osm.pbf"
+    }
+  },
+  "groups": [
+    { "id": "north-china", "name": "华北", "order": 10 },
+    { "id": "northeast", "name": "东北", "order": 20 },
+    { "id": "east-china", "name": "华东", "order": 30 },
+    { "id": "central-south", "name": "中南", "order": 40 },
+    { "id": "southwest", "name": "西南", "order": 50 },
+    { "id": "northwest", "name": "西北", "order": 60 }
+  ],
+  "datasets": [
+    { "id": "beijing", "name": "北京市", "shortName": "北京", "abbreviation": "京", "administrativeType": "municipality", "groupId": "north-china", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 39, "estimatedInstallGiB": [0.2, 0.55], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [30, 90], "bounds": [115.395, 39.42, 117.53, 41.08] },
+    { "id": "tianjin", "name": "天津市", "shortName": "天津", "abbreviation": "津", "administrativeType": "municipality", "groupId": "north-china", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 16, "estimatedInstallGiB": [0.12, 0.35], "estimatedTemporaryGiB": 3, "estimatedBuildMinutes": [25, 75], "bounds": [116.68, 38.525, 118.085, 40.27] },
+    { "id": "hebei", "name": "河北省", "shortName": "河北", "abbreviation": "冀", "administrativeType": "province", "groupId": "north-china", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 111, "estimatedInstallGiB": [0.45, 1.0], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [45, 130], "bounds": [113.435, 36.025, 121.045, 42.64] },
+    { "id": "shanxi", "name": "山西省", "shortName": "山西", "abbreviation": "晋", "administrativeType": "province", "groupId": "north-china", "order": 40, "sourceProfileId": "china-common", "sourceSizeMiB": 32, "estimatedInstallGiB": [0.25, 0.65], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 100], "bounds": [110.2, 34.56, 114.585, 40.765] },
+    { "id": "inner_mongolia", "name": "内蒙古自治区", "shortName": "内蒙古", "abbreviation": "内蒙古", "administrativeType": "autonomous-region", "groupId": "north-china", "order": 50, "sourceProfileId": "china-common", "sourceSizeMiB": 43, "estimatedInstallGiB": [0.3, 0.8], "estimatedTemporaryGiB": 7, "estimatedBuildMinutes": [45, 140], "bounds": [97.13, 37.37, 126.11, 53.37] },
+
+    { "id": "liaoning", "name": "辽宁省", "shortName": "辽宁", "abbreviation": "辽", "administrativeType": "province", "groupId": "northeast", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 28, "estimatedInstallGiB": [0.25, 0.65], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 100], "bounds": [118.815, 38.35, 125.805, 43.51] },
+    { "id": "jilin", "name": "吉林省", "shortName": "吉林", "abbreviation": "吉", "administrativeType": "province", "groupId": "northeast", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 27, "estimatedInstallGiB": [0.2, 0.55], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 100], "bounds": [121.605, 40.84, 131.33, 46.325] },
+    { "id": "heilongjiang", "name": "黑龙江省", "shortName": "黑龙江", "abbreviation": "黑", "administrativeType": "province", "groupId": "northeast", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 37, "estimatedInstallGiB": [0.25, 0.65], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [40, 120], "bounds": [121.14, 43.38, 134.82, 53.6] },
+
+    { "id": "shanghai", "name": "上海市", "shortName": "上海", "abbreviation": "沪", "administrativeType": "municipality", "groupId": "east-china", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 28, "estimatedInstallGiB": [0.2, 0.5], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [30, 90], "bounds": [120.83, 30.64, 123.355, 31.9] },
+    { "id": "jiangsu", "name": "江苏省", "shortName": "江苏", "abbreviation": "苏", "administrativeType": "province", "groupId": "east-china", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 83, "estimatedInstallGiB": [0.35, 0.8], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [15, 35], "bounds": [116.335, 30.74, 122.405, 35.185] },
+    { "id": "zhejiang", "name": "浙江省", "shortName": "浙江", "abbreviation": "浙", "administrativeType": "province", "groupId": "east-china", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 92, "estimatedInstallGiB": [0.5, 1.1], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [50, 140], "bounds": [118.005, 26.84, 123.415, 31.205] },
+    { "id": "anhui", "name": "安徽省", "shortName": "安徽", "abbreviation": "皖", "administrativeType": "province", "groupId": "east-china", "order": 40, "sourceProfileId": "china-common", "sourceSizeMiB": 43, "estimatedInstallGiB": [0.25, 0.65], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [15, 35], "bounds": [114.855, 29.375, 119.665, 34.675] },
+    { "id": "fujian", "name": "福建省", "shortName": "福建", "abbreviation": "闽", "administrativeType": "province", "groupId": "east-china", "order": 50, "sourceProfileId": "china-common", "sourceSizeMiB": 44, "estimatedInstallGiB": [0.25, 0.7], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 110], "bounds": [115.825, 23.18, 121.055, 28.34] },
+    { "id": "jiangxi", "name": "江西省", "shortName": "江西", "abbreviation": "赣", "administrativeType": "province", "groupId": "east-china", "order": 60, "sourceProfileId": "china-common", "sourceSizeMiB": 49, "estimatedInstallGiB": [0.25, 0.7], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 110], "bounds": [113.55, 24.465, 118.5, 30.1] },
+    { "id": "shandong", "name": "山东省", "shortName": "山东", "abbreviation": "鲁", "administrativeType": "province", "groupId": "east-china", "order": 70, "sourceProfileId": "china-common", "sourceSizeMiB": 74, "estimatedInstallGiB": [0.4, 0.95], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [45, 125], "bounds": [114.795, 34.36, 122.975, 38.62] },
+    { "id": "taiwan", "name": "台湾省", "shortName": "台湾", "abbreviation": "台", "administrativeType": "province", "groupId": "east-china", "order": 80, "sourceProfileId": "taiwan-geofabrik", "sourceSizeMiB": 309, "estimatedInstallGiB": [1.0, 2.2], "estimatedTemporaryGiB": 12, "estimatedBuildMinutes": [90, 240], "bounds": [118.104, 20.728, 122.931, 26.603] },
+
+    { "id": "henan", "name": "河南省", "shortName": "河南", "abbreviation": "豫", "administrativeType": "province", "groupId": "central-south", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 49, "estimatedInstallGiB": [0.3, 0.8], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [40, 120], "bounds": [110.335, 31.365, 116.665, 36.385] },
+    { "id": "hubei", "name": "湖北省", "shortName": "湖北", "abbreviation": "鄂", "administrativeType": "province", "groupId": "central-south", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 55, "estimatedInstallGiB": [0.3, 0.75], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [40, 120], "bounds": [108.345, 29.015, 116.15, 33.295] },
+    { "id": "hunan", "name": "湖南省", "shortName": "湖南", "abbreviation": "湘", "administrativeType": "province", "groupId": "central-south", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 51, "estimatedInstallGiB": [0.3, 0.75], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [40, 120], "bounds": [108.765, 24.615, 114.275, 30.15] },
+    { "id": "guangdong", "name": "广东省", "shortName": "广东", "abbreviation": "粤", "administrativeType": "province", "groupId": "central-south", "order": 40, "sourceProfileId": "china-common", "sourceSizeMiB": 179, "estimatedInstallGiB": [0.7, 1.6], "estimatedTemporaryGiB": 8, "estimatedBuildMinutes": [60, 180], "bounds": [109.43, 20.1, 117.685, 25.54] },
+    { "id": "guangxi", "name": "广西壮族自治区", "shortName": "广西", "abbreviation": "桂", "administrativeType": "autonomous-region", "groupId": "central-south", "order": 50, "sourceProfileId": "china-common", "sourceSizeMiB": 52, "estimatedInstallGiB": [0.25, 0.7], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [40, 120], "bounds": [104.43, 20.685, 112.075, 26.41] },
+    { "id": "hainan", "name": "海南省", "shortName": "海南", "abbreviation": "琼", "administrativeType": "province", "groupId": "central-south", "order": 60, "sourceProfileId": "china-common", "sourceSizeMiB": 10, "estimatedInstallGiB": [0.1, 0.35], "estimatedTemporaryGiB": 3, "estimatedBuildMinutes": [25, 80], "bounds": [108.35, 8.61, 118.09, 20.38] },
+    { "id": "hong_kong", "name": "香港特别行政区", "shortName": "香港", "abbreviation": "港", "administrativeType": "sar", "groupId": "central-south", "order": 70, "sourceProfileId": "china-common", "sourceSizeMiB": 41, "estimatedInstallGiB": [0.2, 0.5], "estimatedTemporaryGiB": 3, "estimatedBuildMinutes": [25, 80], "bounds": [113.813, 22.133, 114.506, 22.572] },
+    { "id": "macau", "name": "澳门特别行政区", "shortName": "澳门", "abbreviation": "澳", "administrativeType": "sar", "groupId": "central-south", "order": 80, "sourceProfileId": "china-common", "sourceSizeMiB": 3.5, "estimatedInstallGiB": [0.05, 0.18], "estimatedTemporaryGiB": 2, "estimatedBuildMinutes": [20, 60], "bounds": [113.524, 22.073, 113.634, 22.221] },
+
+    { "id": "chongqing", "name": "重庆市", "shortName": "重庆", "abbreviation": "渝", "administrativeType": "municipality", "groupId": "southwest", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 31, "estimatedInstallGiB": [0.2, 0.55], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 100], "bounds": [105.265, 28.14, 110.215, 32.23] },
+    { "id": "sichuan", "name": "四川省", "shortName": "四川", "abbreviation": "川", "administrativeType": "province", "groupId": "southwest", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 108, "estimatedInstallGiB": [0.45, 1.1], "estimatedTemporaryGiB": 7, "estimatedBuildMinutes": [50, 150], "bounds": [97.31, 26.01, 108.58, 34.35] },
+    { "id": "guizhou", "name": "贵州省", "shortName": "贵州", "abbreviation": "黔", "administrativeType": "province", "groupId": "southwest", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 29, "estimatedInstallGiB": [0.2, 0.55], "estimatedTemporaryGiB": 4, "estimatedBuildMinutes": [35, 100], "bounds": [103.58, 24.6, 109.615, 29.245] },
+    { "id": "yunnan", "name": "云南省", "shortName": "云南", "abbreviation": "云", "administrativeType": "province", "groupId": "southwest", "order": 40, "sourceProfileId": "china-common", "sourceSizeMiB": 87, "estimatedInstallGiB": [0.35, 0.9], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [45, 135], "bounds": [97.505, 21.13, 106.215, 29.27] },
+    { "id": "tibet", "name": "西藏自治区", "shortName": "西藏", "abbreviation": "藏", "administrativeType": "autonomous-region", "groupId": "southwest", "order": 50, "sourceProfileId": "china-common", "sourceSizeMiB": 46, "estimatedInstallGiB": [0.15, 0.5], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [40, 130], "bounds": [78.35, 27.27, 99.16, 36.53] },
+
+    { "id": "shaanxi", "name": "陕西省", "shortName": "陕西", "abbreviation": "陕", "administrativeType": "province", "groupId": "northwest", "order": 10, "sourceProfileId": "china-common", "sourceSizeMiB": 87, "estimatedInstallGiB": [0.35, 0.85], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [45, 130], "bounds": [105.465, 31.685, 111.26, 39.605] },
+    { "id": "gansu", "name": "甘肃省", "shortName": "甘肃", "abbreviation": "甘", "administrativeType": "province", "groupId": "northwest", "order": 20, "sourceProfileId": "china-common", "sourceSizeMiB": 57, "estimatedInstallGiB": [0.25, 0.7], "estimatedTemporaryGiB": 6, "estimatedBuildMinutes": [40, 130], "bounds": [92.26, 32.56, 108.75, 42.83] },
+    { "id": "qinghai", "name": "青海省", "shortName": "青海", "abbreviation": "青", "administrativeType": "province", "groupId": "northwest", "order": 30, "sourceProfileId": "china-common", "sourceSizeMiB": 33, "estimatedInstallGiB": [0.15, 0.5], "estimatedTemporaryGiB": 5, "estimatedBuildMinutes": [35, 110], "bounds": [89.36, 31.5, 103.11, 39.29] },
+    { "id": "ningxia", "name": "宁夏回族自治区", "shortName": "宁夏", "abbreviation": "宁", "administrativeType": "autonomous-region", "groupId": "northwest", "order": 40, "sourceProfileId": "china-common", "sourceSizeMiB": 8.6, "estimatedInstallGiB": [0.08, 0.3], "estimatedTemporaryGiB": 3, "estimatedBuildMinutes": [25, 80], "bounds": [104.265, 35.215, 107.67, 39.405] },
+    { "id": "xinjiang", "name": "新疆维吾尔自治区", "shortName": "新疆", "abbreviation": "新", "administrativeType": "autonomous-region", "groupId": "northwest", "order": 50, "sourceProfileId": "china-common", "sourceSizeMiB": 46, "estimatedInstallGiB": [0.2, 0.65], "estimatedTemporaryGiB": 8, "estimatedBuildMinutes": [45, 150], "bounds": [73.46, 34.29, 96.43, 49.22] }
+  ]
+}

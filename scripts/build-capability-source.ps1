@@ -1,0 +1,138 @@
+param(
+  [string]$OutputId = "giss-core"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "catalog-utils.ps1")
+$catalog = Get-GissExpandedCatalog -Root $root
+$packStatePath = Join-Path $root "data\maintenance\map-pack-state.json"
+$disabledPackIds = @()
+if (Test-Path -LiteralPath $packStatePath -PathType Leaf) {
+  $packState = Get-Content -Raw -LiteralPath $packStatePath | ConvertFrom-Json
+  $disabledPackIds = @($packState.disabledPackIds | ForEach-Object { [string]$_ })
+}
+$osmiumImage = "giss-osmium:1"
+$outputDirectory = Join-Path $root "raw\osm\china"
+$output = Join-Path $outputDirectory "$OutputId-latest.osm.pbf"
+$staged = Join-Path $outputDirectory "$OutputId-staged.osm.pbf"
+$manifestPath = Join-Path $outputDirectory "$OutputId.manifest.json"
+$statePath = Join-Path $outputDirectory "china.state.txt"
+$utf8NoBom = New-Object Text.UTF8Encoding($false)
+
+function Assert-NativeSuccess([string]$Operation) {
+  if ($LASTEXITCODE -ne 0) { throw "$Operation failed with exit code $LASTEXITCODE." }
+}
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker was not found on PATH." }
+if (-not (docker image ls -q $osmiumImage)) {
+  docker build -t $osmiumImage (Join-Path $root "services\tools\osmium")
+  Assert-NativeSuccess "Building the Osmium image"
+}
+
+$inputs = @()
+foreach ($dataset in @($catalog.datasets)) {
+  if ($disabledPackIds -contains [string]$dataset.id) {
+    Write-Host "Skipping disabled region pack $($dataset.id)."
+    continue
+  }
+  $sourceRelative = ([string]$dataset.sourceFile).Replace('/', '\')
+  $sourcePath = Join-Path $root $sourceRelative
+  $productPath = Join-Path $root "products\tiles\pmtiles\$($dataset.id).pmtiles"
+  $packManifestPath = Join-Path $root "products\tiles\pmtiles\$($dataset.id).manifest.json"
+  $productExists = Test-Path -LiteralPath $productPath -PathType Leaf
+  $manifestExists = Test-Path -LiteralPath $packManifestPath -PathType Leaf
+  if (-not $productExists -and -not $manifestExists) {
+    Write-Host "Skipping catalogued but uninstalled region pack $($dataset.id)."
+    continue
+  }
+  if ($productExists -ne $manifestExists) {
+    throw "Regional pack $($dataset.id) is partially installed; both PMTiles and manifest are required."
+  }
+  if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+    throw "Regional source is missing for $($dataset.id): $sourcePath"
+  }
+  $packManifest = Get-Content -Raw -LiteralPath $packManifestPath | ConvertFrom-Json
+  $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
+  if ($sourceHash -ne ([string]$packManifest.source.sha256).ToLowerInvariant()) {
+    throw "Regional source hash does not match the $($dataset.id) manifest."
+  }
+  $inputs += [pscustomobject][ordered]@{
+    id = [string]$dataset.id
+    relativePath = $sourceRelative.Replace('\', '/')
+    bytes = (Get-Item -LiteralPath $sourcePath).Length
+    sha256 = $sourceHash
+    sourceSequence = [string]$packManifest.source.sequenceNumber
+    sourceUpdatedAt = [string]$packManifest.source.updatedAt
+  }
+}
+
+if ($inputs.Count -lt 1) { throw "The map catalog contains no capability-source inputs." }
+$sequences = @($inputs.sourceSequence | Select-Object -Unique)
+$sourceSequence = if ($sequences.Count -eq 1) { $sequences[0] } else { "mixed" }
+
+New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+$containerInputs = @($inputs | ForEach-Object { "/data/$($_.relativePath)" })
+
+try {
+  Write-Host "Merging $($inputs.Count) verified regional sources into $OutputId..."
+  docker run --rm -v "${root}:/data" $osmiumImage merge @containerInputs `
+    -o "/data/raw/osm/china/$OutputId-staged.osm.pbf"
+  Assert-NativeSuccess "Merging the capability source"
+
+  docker run --rm -v "${root}:/data" $osmiumImage fileinfo -e "/data/raw/osm/china/$OutputId-staged.osm.pbf" | Out-Host
+  Assert-NativeSuccess "Reading capability-source metadata"
+
+  $savedErrorAction = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $referenceCheck = docker run --rm -v "${root}:/data" $osmiumImage check-refs "/data/raw/osm/china/$OutputId-staged.osm.pbf" 2>&1
+  $referenceExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $savedErrorAction
+  $referenceLines = @($referenceCheck | ForEach-Object { "$_" })
+  $referenceLines | ForEach-Object { Write-Host $_ }
+  if ($referenceExitCode -ne 0) {
+    $referenceText = $referenceLines -join "`n"
+    if ($referenceText -match 'Nodes in ways missing:\s+(\d+)' -and [int]$matches[1] -le 100) {
+      Write-Warning "$OutputId inherited $($matches[1]) missing way nodes from the upstream China extract."
+    }
+    else {
+      throw "Checking capability-source references failed with exit code $referenceExitCode."
+    }
+  }
+
+  if (Test-Path -LiteralPath $output) {
+    Copy-Item -LiteralPath $output -Destination (Join-Path $outputDirectory "$OutputId.previous.osm.pbf") -Force
+  }
+  Move-Item -LiteralPath $staged -Destination $output -Force
+
+  $state = @{}
+  if (Test-Path -LiteralPath $statePath) {
+    foreach ($line in Get-Content -LiteralPath $statePath) {
+      if ($line -match '^([^=]+)=(.*)$') { $state[$matches[1]] = $matches[2].Replace('\:', ':') }
+    }
+  }
+  $manifest = [ordered]@{
+    schemaVersion = 1
+    id = $OutputId
+    generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    source = [ordered]@{
+      sequence = $sourceSequence
+      inputSequences = @($sequences)
+      updatedAt = if ($state.timestamp) { $state.timestamp } else { $inputs[0].sourceUpdatedAt }
+      catalogVersion = [string]$catalog.version
+    }
+    inputs = $inputs
+    product = [ordered]@{
+      path = "raw/osm/china/$OutputId-latest.osm.pbf"
+      bytes = (Get-Item -LiteralPath $output).Length
+      sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $output).Hash.ToLowerInvariant()
+    }
+  }
+  [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), $utf8NoBom)
+}
+finally {
+  if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+}
+
+Get-Item -LiteralPath $output, $manifestPath | Select-Object FullName, Length, LastWriteTime

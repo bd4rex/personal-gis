@@ -1,86 +1,156 @@
-# 个人 GIS
+# GISS Personal Offline Map
 
-面向江苏、安徽区域的本地优先个人地理信息系统 MVP。项目把个人点位数据与底图分离，当前已经具备静态 GeoJSON 浏览路径，并为 PostGIS + Martin 矢量瓦片路径准备了可运行配置。
+GISS is a local-first personal GIS with 34 Chinese province units and a synchronized global Geofabrik catalog. It combines an interactive offline OpenStreetMap base map with self-owned places, tracks, photos, full address search, route planning, terrain, weather, nautical references, a Chinese encyclopedia and travel guide, backup, and disconnected recovery.
 
-> 文档基线：2026-08-01。文档严格区分当前实现与后续规划；空目录不代表对应能力已经完成。
+The browser only needs one local URL:
 
-GitHub：[bd4rex/personal-gis](https://github.com/bd4rex/personal-gis)（公开仓库）
-
-本基线已完成干净数据卷实机验证：PostgreSQL 16.9 / PostGIS 3.5.2、Martin 1.11.0、唯一 `places_web` 发布源、TileJSON、MVT 和静态 HTTP 路径均通过。
-
-## 当前状态
-
-| 能力 | 状态 | 当前实现 |
-|---|---|---|
-| Web 地图浏览 | 已实现 | `web/index.html` + MapLibre GL JS 5.6.0 |
-| 在线底图 | 已实现 | 浏览器直接读取 OpenStreetMap 标准栅格瓦片 |
-| 静态个人点位 | 已实现 | `data/places.geojson`，含 2 个演示点 |
-| 空间数据库 | 已配置、未启动 | PostgreSQL 16 + PostGIS 3.5，Docker Compose 管理 |
-| 矢量瓦片服务 | 已配置、未启动 | Martin 1.11.0，仅发布白名单中的 PostGIS 空间视图 |
-| Web 数据源回退 | 已实现 | Martin 不可用时自动回退到本地 GeoJSON |
-| QGIS / QField 项目 | 规划中 | `qgis/` 为空，尚无 `.qgz` / `.gpkg` |
-| 导入、导出与同步 | 规划中 | 目录已预留，尚无 ETL 或同步脚本 |
-| 离线底图 | 规划中 | MBTiles / PMTiles 目录已预留，尚无数据或服务配置 |
-
-## 架构总览
-
-```mermaid
-flowchart LR
-    U["用户浏览器"] -->|"HTTP :8080/web/"| W["静态 Web\nHTML + MapLibre"]
-    W -->|"首选：TileJSON / MVT\nHTTP :3000"| M["Martin"]
-    M -->|"SQL / TCP :5432"| P[("PostgreSQL 16\nPostGIS 3.5")]
-    W -.->|"Martin 不可用时回退"| G["data/places.geojson"]
-    W -->|"HTTPS"| C["unpkg CDN\nMapLibre 5.6.0"]
-    W -->|"HTTPS"| O["OpenStreetMap\n栅格瓦片"]
-    I["services/postgis/init.sql"] -->|"仅首次初始化空数据卷"| P
+```text
+http://localhost:8080/
 ```
 
-完整的组件关系、调用时序、数据模型和演进边界见[技术架构与组合逻辑](docs/architecture.md)。
+资源与地图版本管理使用独立页面：
 
-## 快速启动
+```text
+http://localhost:8080/resources.html
+```
 
-仅启动静态预览：
+该页面默认展示全部已安装地图包，并提供添加区域、上游版本检查、更新/重建、启停、完整性校验、原子回退、受保护删除、任务速率和分类磁盘占用。实现约束见 [`docs/RESOURCE_AND_VERSION_MANAGEMENT.md`](docs/RESOURCE_AND_VERSION_MANAGEMENT.md)。
+
+## Current system
+
+| Part | Purpose |
+| --- | --- |
+| MapLibre GL JS | Renders the local vector map and personal layers in the browser |
+| PMTiles | Stores each regional OpenMapTiles base map as one portable, checksum-tracked file |
+| FastAPI | CRUD, GPX import/export, owned media, unified search, status, and portable personal archives |
+| PostGIS | Personal source of truth plus a reproducible 126k-place offline OSM reference index |
+| Martin | Publishes the approved PostGIS views as vector tiles |
+| Nominatim | Full local address search and reverse geocoding |
+| Valhalla | Local driving, cycling, and walking routes built from the same OSM snapshot |
+| SRTM / Terrarium | Point elevation, route profiles, hillshade, and browser-generated vector contours |
+| Natural Earth | Provides the installed global low-zoom overview, country outlines, and major-city labels |
+| Open-Meteo snapshot | Provides a locally saved seven-day layer for 29 Jiangsu/Anhui cities |
+| Kiwix | Serves checksum-pinned Chinese Wikipedia and Wikivoyage ZIMs at `/wiki/` |
+| Maintenance worker | Executes allowlisted map/resource jobs from the local queue and records progress/results |
+| nginx | The only host-facing service; serves the UI and proxies API/Martin |
+
+Only `127.0.0.1:8080` is exposed. PostGIS, FastAPI, and Martin stay inside the Docker network.
+
+## Start and verify
+
+The start command launches Docker Desktop when it is installed but not running.
 
 ```powershell
-.\scripts\start-web.ps1
+D:\GISS\start-giss.cmd
+D:\GISS\health-check.cmd
+D:\GISS\smoke-test.cmd
 ```
 
-然后访问 `http://localhost:8080/web/`。
+`start-giss.cmd` creates strong local database and Nominatim passwords when needed, applies versioned migrations, builds the API image, and starts the core services. It automatically enables the advanced profile when its prepared data is present.
 
-当前检查到本机的 `8080` 已被另一套 `giss-web` 容器占用。释放端口前，可直接改用：
+Prepare or rebuild the advanced offline capabilities:
 
 ```powershell
-.\scripts\start-web.ps1 -Port 8081
+D:\GISS\prepare-advanced.cmd
 ```
 
-并访问 `http://localhost:8081/web/`。
+This merges installed region sources into one capability PBF; prepares the encyclopedia, travel guide, global overview, weather, and nautical references; builds the Valhalla graph and elevation cache; and imports Nominatim. The first build is CPU-, memory-, and disk-intensive; later starts reuse the products and index.
 
-启动 PostGIS 和 Martin：
+## Everyday operations
 
 ```powershell
-.\scripts\start-services.ps1
+D:\GISS\backup-giss.cmd
+D:\GISS\stop-giss.cmd
+D:\GISS\start-giss.cmd
 ```
 
-启动后，Web 页面优先尝试 `http://localhost:3000/places_web`；请求失败时自动使用 `data/places.geojson`。
+Backups are written under `D:\GISS\backups\<timestamp>` and include a PostgreSQL custom dump, media, and SHA256 manifest. The default policy keeps 14 backups.
 
-## 文档导航
+`install-backup-task.cmd` installs the local `GISS Daily Personal Backup` Windows task for 03:00 every day. Pass `-MirrorRoot E:\GISS-BACKUPS` to `scripts\backup-giss.ps1` when a second physical disk is available; the script rejects a mirror on the same drive.
 
-| 文档 | 内容 |
-|---|---|
-| [技术架构与组合逻辑](docs/architecture.md) | 系统边界、组件分层、依赖关系、启动与请求时序、数据流、数据模型、演进架构 |
-| [资源与配置清单](docs/resource-configuration.md) | 镜像、容器、端口、网络、卷、环境变量、健康检查、数据库对象、前端参数、外部资源、容量与安全边界 |
-| [运行与验证手册](docs/operations.md) | 启动、检查、验证、停止、备份、故障定位及当前端口冲突 |
-| [本地技术栈摘要](docs/local-stack.md) | 最短的本地栈说明与入口 |
-| [MVP 路线图](docs/local-mvp-plan.md) | 从文件型验证到 PostGIS、移动采集与同步的阶段规划 |
+For a fully disconnected recovery package, including the active maps, source PBFs, build caches, Docker images, and a fresh personal-data backup:
 
-## 数据与隐私
+```powershell
+D:\GISS\create-offline-kit.cmd
+D:\GISS\test-offline-recovery.cmd
+```
 
-本仓库为公开仓库，只应提交代码、配置、文档和脱敏演示数据。`.gitignore` 已排除会话记录、个人照片、导入数据、GeoPackage、GPX、MBTiles、PMTiles 和 OsmAnd 数据包。不要提交真实个人点位；新增数据前必须确认已经脱敏。
+The recovery test restores the kit on a temporary Docker `--internal` network and writes an audit report under `runtime/recovery-audit` without stopping the live system.
 
-## 当前约束
+## Manage regional maps
 
-- `services/docker-compose.yml` 中的 `gis/gis` 是本地开发默认凭据，不可用于公网或生产环境。
-- Martin 已锁定为 1.11.0，但镜像尚未锁定 digest；最高复现要求下仍应记录镜像摘要。
-- 未配置 CPU、内存、日志大小、TLS、鉴权、备份任务和监控；容器重启策略为 `unless-stopped`。
-- 页面依赖互联网加载 MapLibre CDN 与 OSM 底图，因此还不是完整离线系统。
-- `init.sql` 只在 PostGIS 数据卷首次创建时自动执行；修改 SQL 不会自动迁移已有数据库。
+System -> Manage resources provides Available, Local, and Updates views. Available keeps the world hierarchy visible in a left browser while the selected region's details stay on the right. China contains 34 independent province-level units; the synchronized global directory adds more than 550 Geofabrik country/region packs. Geographic headings are navigation only, never bundled downloads. Jiangsu, Anhui, Shanghai, and Zhejiang are installed and rendered together by default; the region shortcuts only focus the camera and do not hide the other installed packs.
+
+The map itself now carries the same ownership transition. A local Natural Earth world overview remains visible at low zoom; locating an uninstalled catalog region opens a prompt to either view that viewport temporarily through the optional OpenStreetMap Standard source or open the exact region package for an offline build. Online tiles are never bulk-cached or treated as owned data.
+
+Build, update, and remove buttons create real allowlisted local maintenance jobs. `start-giss.cmd` starts the hidden worker with Docker, and `stop-giss.cmd` stops it. The Updates view shows each task's queue position, elapsed time, current build stage, live transfer/generation throughput, and in-row cancel/retry action; its summary bar contains totals only. Installed map jobs derive a five-stage progress model from their live maintenance logs instead of presenting a made-up byte percentage. Curl-backed downloads report bytes per second and received/total bytes, while Planetiler reports generated tiles, tiles per second, and staged output size. The manager can automatically refresh weather every 6 hours plus the global directory every 7 days. Installed map freshness is compared with the provider's trusted HTTPS replication state rather than guessed from local dates. Heavy map builds, encyclopedia downloads, and shared search/route rebuilds remain explicit actions and are never included in the regular automatic batch.
+
+Resource inventory is cache-first: the last complete, host-persisted inventory is displayed immediately while local storage and update checks refresh together in the background. Available regions render directly from the already-loaded catalog, and maintenance state is fetched independently, so a large local disk scan cannot hide an active task. OsmAnd-informed design boundaries and the next management features are documented in `docs/OSMAND_REFERENCE.md`.
+
+```powershell
+D:\GISS\region-pack.cmd List
+D:\GISS\region-pack.cmd Verify
+D:\GISS\region-pack.cmd Plan -PackId jiangsu
+D:\GISS\region-pack.cmd Build -PackId jiangsu
+D:\GISS\region-pack.cmd Update -PackId jiangsu
+D:\GISS\region-pack.cmd Remove -PackId jiangsu -ConfirmRemove
+D:\GISS\region-pack.cmd Plan -PackId gf-japan
+D:\GISS\rebuild-shared-indexes.cmd -Plan
+```
+
+`Plan` resolves all paths and estimates without changing data. `Build` uses owned source data; `Update` refreshes trusted provider state and source first, then creates one staged PMTiles and replaces the old product only after validation. Shared China-snapshot province updates reuse one newly validated download at the same sequence. A completed update disappears from Updates, and the API rejects another update at the same sequence; **Rebuild** is the separate source-current regeneration action. `Verify` checks installed hashes. `Remove` deletes only the derived map/manifest after explicit confirmation and retains offline rebuild inputs.
+
+After adding or updating map packs, the Updates tab reports whether shared address and route indexes are stale. `rebuild-shared-indexes.cmd -ConfirmRebuild` snapshots the current Nominatim volume and Valhalla products, rebuilds them sequentially, and rolls back derived indexes if either rebuild fails.
+
+## Refresh the source snapshot
+
+```powershell
+D:\GISS\download-osm.cmd
+D:\GISS\region-pack.cmd Update -PackId jiangsu
+D:\GISS\region-pack.cmd Update -PackId anhui
+D:\GISS\import-reference-search.cmd
+D:\GISS\health-check.cmd
+```
+
+Downloads and builds use staging files. The previous usable PBF and PMTiles remain in place until validation succeeds. The current combined source is built from one China snapshot to avoid duplicate OSM object IDs along the provincial boundary.
+
+`import-reference-search.cmd` rebuilds the lightweight offline search index from the same regional PBF. It currently indexes named OSM nodes such as cities, stations, amenities, shops, tourism, and historic places. The UI keeps personal results distinct and lets a reference result be copied into the personal database.
+
+Rendered OSM places, POIs, roads, water, peaks, parks, and buildings are clickable. The detail panel enriches tile properties with nearby reference-index tags, groups dense results, finds nearby places, and saves a selected feature into a personal collection. Personal point details include collections, nearby tracks, photos, editing, and deletion.
+
+## Important paths
+
+| Path | Contents |
+| --- | --- |
+| `web/` | Map application, local JS/CSS, glyphs, and sprites |
+| `services/` | Docker Compose, API, nginx, Martin, and SQL migrations |
+| `raw/osm/` | Downloaded OSM PBF files, state files, and province polygons |
+| `web/config/region-catalog.json` | 34 province datasets, source profiles, bounds, estimates, and legacy coverage |
+| `web/config/world-region-catalog.json` | Generated global Geofabrik hierarchy and country/region build definitions |
+| `web/config/map-catalog.json` | Active province and rendering limits |
+| `products/tiles/pmtiles/*.pmtiles` | Installed offline regional base maps |
+| `products/routing/valhalla/` | Route graph, 58 local elevation grids, and build configuration |
+| `products/encyclopedia/` | Verified Chinese Wikipedia ZIM and manifest |
+| `products/weather/` | Local seven-day weather snapshot and manifest |
+| `products/nautical/` | OSM seamark/harbor reference layer and manifest |
+| `web/assets/overview/` | Natural Earth global overview, countries, and major places |
+| `raw/osm/china/giss-core-latest.osm.pbf` | Shared source for address and route engines |
+| `data/terrain-cache/` | On-demand Terrarium PNG cache shared by hillshade and vector contour generation |
+| `data/maintenance/` | Maintenance settings, queue state, worker heartbeat, job history, and logs |
+| `data/media/` | Content-addressed personal image files |
+| `backups/` | Database and media recovery points |
+| `offline-kit/` | Generated checksum-protected disconnected recovery packages (latest two retained) |
+| `scripts/` | Rebuild, migrate, backup, restore, health, and smoke-test scripts |
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Data pipeline](docs/DATA_PIPELINE.md)
+- [Operations](docs/OPERATIONS.md)
+- [Rebuild from scratch](docs/REBUILD.md)
+- [Offline recovery](docs/OFFLINE_RECOVERY.md)
+- [Sources and licenses](docs/SOURCES_AND_LICENSES.md)
+- [Roadmap](docs/ROADMAP.md)
+
+The system is intentionally split into replaceable layers. PMTiles is the reference map, PostGIS is the personal source of truth, and the browser is only a client. Nominatim, Valhalla, Kiwix, and the terrain adapter sit behind stable local boundaries, so the engines and regional coverage can evolve without migrating personal records.
