@@ -1,0 +1,33 @@
+# Codex/session working files may contain private conversation context.
+gao/
+
+# Local secrets and machine-specific overrides.
+.env
+.env.*
+!.env.example
+*.local
+
+# Personal/raw GIS data. Keep the small demo GeoJSON in data/places.geojson.
+data/imports/**
+data/photos/**
+data/basemaps/**
+backups/
+*.dump
+*.gpkg
+*.gpkg-*
+*.mbtiles
+*.pmtiles
+*.obf
+*.gpx
+
+# Local QGIS caches and user state; project definitions may still be committed.
+*.qgd
+*.qgd-shm
+*.qgd-wal
+.qgis/
+
+# Common generated files.
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db

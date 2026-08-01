@@ -1,0 +1,48 @@
+{
+  "type": "FeatureCollection",
+  "name": "places",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "demo-001",
+        "name": "南京示例点",
+        "province": "江苏省",
+        "category": "todo",
+        "note": "江苏 MVP 种子点，后续可替换为真实标记。",
+        "tags": "jiangsu,demo,mvp",
+        "rating": 3,
+        "source": "manual",
+        "photo_path": "",
+        "created_at": "2026-07-03T00:00:00+08:00",
+        "updated_at": "2026-07-03T00:00:00+08:00",
+        "sync_state": "local"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [118.7969, 32.0603]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "demo-002",
+        "name": "合肥示例点",
+        "province": "安徽省",
+        "category": "field",
+        "note": "安徽 MVP 种子点，用于验证分类、弹窗和数据发布。",
+        "tags": "anhui,field,qfield",
+        "rating": 4,
+        "source": "manual",
+        "photo_path": "",
+        "created_at": "2026-07-03T00:00:00+08:00",
+        "updated_at": "2026-07-03T00:00:00+08:00",
+        "sync_state": "local"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [117.2272, 31.8206]
+      }
+    }
+  ]
+}

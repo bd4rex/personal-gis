@@ -1,0 +1,39 @@
+name: personal-gis
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.5
+    container_name: personal-gis-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: personal_gis
+      POSTGRES_USER: gis
+      POSTGRES_PASSWORD: gis
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./postgis/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gis -d personal_gis"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  martin:
+    image: ghcr.io/maplibre/martin:1.11.0
+    container_name: personal-gis-martin
+    restart: unless-stopped
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://gis:gis@postgis:5432/personal_gis
+    command: ["--config", "/config.yml"]
+    volumes:
+      - ./martin/config.yml:/config.yml:ro
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgis_data:

@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>个人 GIS MVP - 江苏 / 安徽</title>
+    <link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+      html,
+      body,
+      #map {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        font-family: "Microsoft YaHei", Arial, sans-serif;
+        color: #17201a;
+      }
+
+      .panel {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        z-index: 2;
+        width: min(360px, calc(100vw - 24px));
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid #d6ded8;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(25, 42, 31, 0.16);
+        padding: 12px;
+      }
+
+      .panel h1 {
+        margin: 0 0 8px;
+        font-size: 18px;
+        line-height: 1.3;
+      }
+
+      .panel p {
+        margin: 0 0 10px;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .status {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 10px;
+        font-size: 12px;
+      }
+
+      .status strong {
+        font-weight: 600;
+      }
+
+      .legend {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .dot.todo {
+        background: #d84b2a;
+      }
+
+      .dot.field {
+        background: #1f7a53;
+      }
+
+      .maplibregl-popup-content {
+        border-radius: 8px;
+        padding: 10px 12px;
+        min-width: 200px;
+      }
+
+      .popup-title {
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .popup-meta {
+        color: #4f5f55;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <section class="panel">
+      <h1>个人 GIS MVP</h1>
+      <p>范围：江苏省、安徽省。当前页面先读取本地 GeoJSON；PostGIS + Martin 启动后可接入本地矢量瓦片。</p>
+      <div class="status">
+        <strong>数据源</strong><span id="sourceStatus">data/places.geojson</span>
+        <strong>范围</strong><span>江苏 / 安徽</span>
+        <strong>点位</strong><span id="countStatus">加载中</span>
+      </div>
+      <div class="legend">
+        <span><i class="dot todo"></i>todo</span>
+        <span><i class="dot field"></i>field</span>
+      </div>
+    </section>
+
+    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+    <script>
+      const bounds = [
+        [114.7, 29.3],
+        [122.1, 35.4]
+      ];
+
+      const map = new maplibregl.Map({
+        container: "map",
+        bounds,
+        fitBoundsOptions: { padding: 60 },
+        maxBounds: [
+          [113.8, 28.5],
+          [123.0, 36.2]
+        ],
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: "raster",
+              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tileSize: 256,
+              attribution: "© OpenStreetMap contributors"
+            }
+          },
+          layers: [
+            {
+              id: "osm",
+              type: "raster",
+              source: "osm"
+            }
+          ]
+        }
+      });
+
+      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
+
+      const addPlaceLayers = (sourceId, sourceLayer) => {
+        const layerBase = {
+          id: "places-circle",
+          type: "circle",
+          source: sourceId,
+          paint: {
+            "circle-radius": 8,
+            "circle-color": [
+              "match",
+              ["get", "category"],
+              "field",
+              "#1f7a53",
+              "todo",
+              "#d84b2a",
+              "#3569a8"
+            ],
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#ffffff"
+          }
+        };
+        const labelBase = {
+          id: "places-label",
+          type: "symbol",
+          source: sourceId,
+          layout: {
+            "text-field": ["get", "name"],
+            "text-size": 13,
+            "text-offset": [0, 1.25],
+            "text-anchor": "top"
+          },
+          paint: {
+            "text-color": "#1c2c22",
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.5
+          }
+        };
+
+        if (sourceLayer) {
+          layerBase["source-layer"] = sourceLayer;
+          labelBase["source-layer"] = sourceLayer;
+        }
+
+        map.addLayer(layerBase);
+        map.addLayer(labelBase);
+
+        map.on("click", "places-circle", (event) => {
+          const feature = event.features[0];
+          const props = feature.properties;
+          new maplibregl.Popup()
+            .setLngLat(event.lngLat)
+            .setHTML(`
+              <div class="popup-title">${props.name}</div>
+              <div class="popup-meta">${props.province || ""} · ${props.category || ""} · ${props.source || ""}</div>
+              <div>${props.note || ""}</div>
+            `)
+            .addTo(map);
+        });
+
+        map.on("mouseenter", "places-circle", () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", "places-circle", () => {
+          map.getCanvas().style.cursor = "";
+        });
+      };
+
+      map.on("load", async () => {
+        let count = "未知";
+        try {
+          const response = await fetch("../data/places.geojson");
+          const places = await response.json();
+          count = `${places.features.length} 个`;
+        } catch {
+          count = "数据库图层";
+        }
+        document.getElementById("countStatus").textContent = count;
+
+        try {
+          const tileJsonResponse = await fetch("http://localhost:3000/places_web");
+          if (!tileJsonResponse.ok) {
+            throw new Error("Martin is not available");
+          }
+
+          map.addSource("places", {
+            type: "vector",
+            url: "http://localhost:3000/places_web"
+          });
+          document.getElementById("sourceStatus").textContent = "PostGIS -> Martin -> MapLibre";
+          addPlaceLayers("places", "places_web");
+          return;
+        } catch {
+          document.getElementById("sourceStatus").textContent = "data/places.geojson";
+        }
+
+        const response = await fetch("../data/places.geojson");
+        const places = await response.json();
+
+        map.addSource("places", {
+          type: "geojson",
+          data: places
+        });
+
+        addPlaceLayers("places");
+      });
+    </script>
+  </body>
+</html>

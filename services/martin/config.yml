@@ -1,0 +1,28 @@
+# Martin 1.11 configuration. Only the curated Web view is published.
+listen_addresses: 0.0.0.0:3000
+cors: true
+
+postgres:
+  connection_string: ${DATABASE_URL}
+  default_srid: 4326
+  auto_publish: false
+  tables:
+    places_web:
+      schema: app
+      table: places_web
+      srid: 4326
+      geometry_column: geom
+      geometry_type: POINT
+      properties:
+        id: text
+        name: text
+        province: text
+        category: text
+        note: text
+        tags: text
+        rating: int4
+        source: text
+        photo_path: text
+        created_at: timestamptz
+        updated_at: timestamptz
+        sync_state: text
