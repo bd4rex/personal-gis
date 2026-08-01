@@ -348,6 +348,7 @@ Four recovery defects were found and fixed during the proof:
 ## 2026-08-02: D-drive migration and maintenance continuity
 
 - Moved the active Docker Desktop WSL store from the C-drive default to `D:\DockerData\wsl` using `CustomWslDistroDir`. Containers, images, named volumes, personal-data counts, the latest backup, seven service health checks, and active VHD writes were verified before treating the D-drive copy as authoritative.
+- Removed the inactive 140.81 GiB logical-size C-drive Docker VHD after the D-drive store continued advancing and all seven containers passed another health check. `D:\DockerData\wsl\disk\docker_data.vhdx` remains the sole Docker data disk; the C-drive project path remains only a junction to `D:\GISS`.
 - Consolidated the evolved project at `D:\GISS` and replaced the old C-drive project path with a junction to the active directory. The previous clean published checkout was retained temporarily as a D-drive legacy archive for migration rollback.
 - Replaced the remaining synchronous PMTiles verification endpoint with `202 Accepted` maintenance jobs. Large SHA256 checks now remain visible and cancellable without timing out nginx or interrupting map browsing.
 - Made resource inventory delivery stale-while-refresh. The API returns the last complete snapshot immediately, starts at most one background scan, and replaces the cache atomically. Maintenance completion no longer deletes the only readable snapshot.
