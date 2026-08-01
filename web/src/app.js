@@ -97,6 +97,7 @@ function cacheElements() {
     "resourceSearchInput", "resourceManagerBody", "resourceRegionBrowser", "resourceRegionList",
     "resourceManagerContent", "viewSwitcher", "mapShortcuts",
     "contourShortcut", "legendShortcut", "legendPopover", "legendCloseButton", "onlineMapShortcut",
+    "mapSourcePopover", "mapSourceCloseButton", "mapSourceStatus", "mapCoverageStatus",
     "coveragePrompt", "coveragePromptTitle", "coveragePromptText",
     "coverageDownloadButton", "coverageCloseButton", "modeBanner",
     "modeText", "cancelModeButton", "coordinateReadout", "toast", "placeDialog",
@@ -297,6 +298,8 @@ function mergeResourceCatalog(baseCatalog, worldCatalog) {
 
 function resourceRegionName(region) {
   if (!region) return "";
+  const fallbackNames = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区" };
+  if (fallbackNames[region.isoCode]) return fallbackNames[region.isoCode];
   if (region.isoCode && typeof Intl.DisplayNames === "function") {
     try {
       return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(region.isoCode) || region.name;
@@ -308,9 +311,12 @@ function resourceRegionName(region) {
 }
 
 function resourcePackName(pack) {
-  if (pack?.kind === "country" && pack.countryId && typeof Intl.DisplayNames === "function") {
+  const regionCode = String(pack?.countryId || "").toUpperCase();
+  const fallbackNames = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区" };
+  if (fallbackNames[regionCode]) return fallbackNames[regionCode];
+  if (pack?.kind === "country" && /^[A-Z]{2}$/.test(regionCode) && typeof Intl.DisplayNames === "function") {
     try {
-      return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(pack.countryId) || pack.name;
+      return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(regionCode) || pack.name;
     } catch {
       // Keep the provider name when a code is not recognized by this browser.
     }
@@ -1147,6 +1153,7 @@ async function refreshMapPackStateFromResources() {
   syncInstalledCatalogDatasets();
   renderViewSwitcher();
   renderRegionPacks();
+  updateCoveragePrompt();
   showToast("地图资源已变化；切换区域时将载入新版本");
 }
 
@@ -2102,24 +2109,103 @@ function syncMapShortcuts() {
     const provider = button.dataset.onlineProvider;
     const active = provider === "offline"
       ? !state.onlineMapEnabled
-      : state.onlineMapEnabled && provider === state.onlineMapProvider;
+      : state.onlineMapEnabled && provider === state.onlinePreferredProvider;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
+    if (button.getAttribute("role") === "radio") button.setAttribute("aria-checked", String(active));
   });
-  if (elements.onlineMapShortcut) {
-    elements.onlineMapShortcut.title = !state.onlineMapEnabled
-      ? "在线标准地图"
-      : state.onlineMapStatus === "degraded"
-        ? "在线地图连接不稳定，正在使用离线概览兜底"
-        : state.onlineMapStatus === "fallback"
-          ? state.onlinePreferredProvider === "openfreemap"
-            ? "OpenFreeMap 开放矢量已连接"
-            : "OSM 标准图连接不稳定，已切换开放矢量备用源"
-        : state.onlineMapStatus === "ready"
-          ? "OSM 标准地图已连接"
-          : state.onlineMapProvider === "openfreemap"
-            ? "正在连接 OpenFreeMap 开放矢量"
-            : "正在连接 OSM 标准地图";
+  syncMapSourceControl();
+}
+
+function mapCoverageAt(longitude, latitude) {
+  const installed = state.mapPacks
+    .filter((pack) => !pack.deprecated && pack.installed && pack.enabled !== false && coordinateInPack(longitude, latitude, pack))
+    .sort((left, right) => {
+      const leftArea = Math.abs((Number(left.bounds[2]) - Number(left.bounds[0])) * (Number(left.bounds[3]) - Number(left.bounds[1])));
+      const rightArea = Math.abs((Number(right.bounds[2]) - Number(right.bounds[0])) * (Number(right.bounds[3]) - Number(right.bounds[1])));
+      return leftArea - rightArea;
+    })[0] || null;
+  return { installed, available: mapPackAt(longitude, latitude) };
+}
+
+function mapSourcePresentation() {
+  if (!state.onlineMapEnabled) return { label: "离线地图", icon: "wifi-off", tone: "offline" };
+  if (state.onlineMapStatus === "degraded") return { label: "在线不可用，已由离线概览补齐", icon: "wifi-off", tone: "degraded" };
+  if (["loading", "fallback-loading"].includes(state.onlineMapStatus)) {
+    const provider = state.onlineMapProvider === "openfreemap" ? "OpenFreeMap" : "OSM 标准地图";
+    return { label: `正在连接 ${provider}`, icon: "wifi", tone: "loading" };
+  }
+  if (state.onlineMapProvider === "openfreemap") {
+    const suffix = state.onlinePreferredProvider === "osm" ? "（备用源）" : "";
+    return { label: `OpenFreeMap 已连接${suffix}`, icon: "wifi", tone: "online" };
+  }
+  return { label: "OSM 标准地图已连接", icon: "wifi", tone: "online" };
+}
+
+function mapFocusCoordinate(coordinate = null) {
+  if (coordinate) return coordinate;
+  if (!state.map) return null;
+  const canvas = state.map.getCanvas();
+  const canvasRect = canvas.getBoundingClientRect();
+  let contentLeft = 0;
+  let contentRight = canvasRect.width;
+  const sideRect = elements.sidePanel?.getBoundingClientRect();
+  if (sideRect && sideRect.right > canvasRect.left && sideRect.left < canvasRect.right) {
+    contentLeft = Math.min(canvasRect.width, sideRect.right - canvasRect.left + 14);
+  }
+  const overlayPanel = !elements.detailPanel?.hidden
+    ? elements.detailPanel
+    : !elements.routePanel?.hidden
+      ? elements.routePanel
+      : null;
+  const overlayRect = overlayPanel?.getBoundingClientRect();
+  if (overlayRect && overlayRect.left < canvasRect.right && overlayRect.right > canvasRect.left) {
+    contentRight = Math.max(0, overlayRect.left - canvasRect.left - 14);
+  }
+  if (contentRight <= contentLeft) return state.map.getCenter();
+  return state.map.unproject([(contentLeft + contentRight) / 2, canvasRect.height / 2]);
+}
+
+function syncMapSourceControl() {
+  if (!elements.onlineMapShortcut) return;
+  const center = mapFocusCoordinate();
+  const promptedPack = !elements.coveragePrompt?.hidden
+    ? state.mapPacks.find((pack) => pack.id === state.coveragePromptPackId)
+    : null;
+  const coverage = promptedPack
+    ? { installed: promptedPack.installed && promptedPack.enabled !== false ? promptedPack : null, available: promptedPack }
+    : center
+      ? mapCoverageAt(Number(center.lng), Number(center.lat))
+      : { installed: null, available: null };
+  const source = mapSourcePresentation();
+  const coverageLabel = coverage.installed
+    ? `${resourcePackName(coverage.installed)}已安装并启用`
+    : coverage.available
+      ? `${resourcePackName(coverage.available)}未安装`
+      : "当前区域暂无独立离线包";
+  const offlineLabel = coverage.installed ? `离线地图：${resourcePackName(coverage.installed)}` : "离线全球概览";
+  const title = state.onlineMapEnabled ? source.label : offlineLabel;
+  elements.mapSourceStatus.textContent = title;
+  elements.mapCoverageStatus.textContent = coverageLabel;
+  elements.onlineMapShortcut.title = `地图来源：${title}`;
+  elements.onlineMapShortcut.setAttribute("aria-label", `地图来源，当前${title}`);
+  const iconName = source.icon;
+  if (elements.onlineMapShortcut.dataset.icon !== iconName) {
+    elements.onlineMapShortcut.dataset.icon = iconName;
+    elements.onlineMapShortcut.innerHTML = `<i data-lucide="${iconName}"></i><span class="map-source-indicator" aria-hidden="true"></span>`;
+    icons();
+  }
+  elements.onlineMapShortcut.classList.remove("source-online", "source-loading", "source-degraded", "source-offline", "source-offline-covered");
+  elements.onlineMapShortcut.classList.add(`source-${source.tone === "offline" && coverage.installed ? "offline-covered" : source.tone}`);
+}
+
+function setMapSourceOpen(open) {
+  if (!elements.mapSourcePopover) return;
+  elements.mapSourcePopover.hidden = !open;
+  elements.onlineMapShortcut.setAttribute("aria-expanded", String(open));
+  if (open) {
+    setLegendOpen(false);
+    syncMapSourceControl();
   }
 }
 
@@ -2225,6 +2311,7 @@ function coordinateInRing(longitude, latitude, ring) {
 }
 
 function coordinateInPack(longitude, latitude, pack) {
+  if (!coordinateInBounds(longitude, latitude, pack.bounds)) return false;
   const candidateIds = [
     pack.id,
     ...(Array.isArray(pack.members) ? pack.members.map((member) => member.id) : []),
@@ -2254,15 +2341,18 @@ function mapPackAt(longitude, latitude) {
 function showCoveragePromptForPack(pack) {
   state.coveragePromptPackId = pack.id;
   const name = resourcePackName(pack);
-  elements.coveragePromptTitle.textContent = `${name}尚未离线安装`;
-  elements.coveragePromptText.textContent = "当前区域只有全球概览；断网前可构建离线区域包。";
+  elements.coveragePromptTitle.textContent = `${name}未安装离线地图`;
+  elements.coveragePromptText.textContent = state.onlineMapEnabled
+    ? "当前使用在线地图；断网后仅保留全球概览。可提前下载此区域。"
+    : "当前仅显示全球离线概览。可在资源管理中下载此区域。";
   elements.coveragePrompt.hidden = false;
+  syncMapSourceControl();
   icons();
 }
 
 function updateCoveragePrompt(coordinate = null, force = false) {
   if (!elements.coveragePrompt || !state.map) return;
-  const center = coordinate || state.map.getCenter();
+  const center = mapFocusCoordinate(coordinate);
   const longitude = Number(center.lng ?? center[0]);
   const latitude = Number(center.lat ?? center[1]);
   const pinnedPack = state.mapPacks.find((pack) => pack.id === state.coveragePromptPinnedId);
@@ -2280,6 +2370,7 @@ function updateCoveragePrompt(coordinate = null, force = false) {
   if (installed || !pack || (!force && belowDetailZoom) || (!force && state.coveragePromptDismissedId === pack.id)) {
     elements.coveragePrompt.hidden = true;
     state.coveragePromptPackId = null;
+    syncMapSourceControl();
     return;
   }
   showCoveragePromptForPack(pack);
@@ -2362,6 +2453,10 @@ function setLegendOpen(open) {
   elements.legendPopover.hidden = !open;
   elements.legendShortcut.classList.toggle("active", open);
   elements.legendShortcut.setAttribute("aria-expanded", String(open));
+  if (open && elements.mapSourcePopover && !elements.mapSourcePopover.hidden) {
+    elements.mapSourcePopover.hidden = true;
+    elements.onlineMapShortcut.setAttribute("aria-expanded", "false");
+  }
 }
 
 function addOfflineReferenceLayers() {
@@ -3413,6 +3508,7 @@ async function checkServices() {
       renderViewSwitcher();
     }
     renderRegionPacks();
+    updateCoveragePrompt();
     updateStatus(apiStatus);
     updateCapabilities(capabilities);
   } catch {
@@ -3431,11 +3527,11 @@ function wireUi() {
     elements.panelToggle.setAttribute("aria-label", elements.panelToggle.title);
     elements.panelToggle.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}"></i>`;
     icons();
+    window.setTimeout(() => updateCoveragePrompt(), 200);
   });
 
-  elements.onlineMapShortcut.addEventListener("click", () => {
-    setOnlineMapEnabled(!state.onlineMapEnabled);
-  });
+  elements.onlineMapShortcut.addEventListener("click", () => setMapSourceOpen(elements.mapSourcePopover.hidden));
+  elements.mapSourceCloseButton.addEventListener("click", () => setMapSourceOpen(false));
   elements.contourShortcut.addEventListener("click", () => {
     setLayerGroupVisibility("contours", state.layerVisibility.contours === false);
   });
@@ -3449,6 +3545,7 @@ function wireUi() {
     state.coveragePromptDismissedId = state.coveragePromptPackId;
     state.coveragePromptPinnedId = null;
     elements.coveragePrompt.hidden = true;
+    syncMapSourceControl();
   });
   elements.legendShortcut.addEventListener("click", () => {
     setLegendOpen(elements.legendPopover.hidden);
@@ -3458,6 +3555,12 @@ function wireUi() {
     if (!elements.legendPopover.hidden && !elements.mapShortcuts.contains(event.target)) {
       setLegendOpen(false);
     }
+    if (!elements.mapSourcePopover.hidden && !elements.mapShortcuts.contains(event.target)) {
+      setMapSourceOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setMapSourceOpen(false);
   });
 
   elements.availablePacksButton.addEventListener("click", () => {
@@ -3790,7 +3893,10 @@ function wireUi() {
     });
   });
   document.querySelectorAll("[data-online-provider]").forEach((button) => {
-    button.addEventListener("click", () => setOnlineMapProvider(button.dataset.onlineProvider));
+    button.addEventListener("click", () => {
+      setOnlineMapProvider(button.dataset.onlineProvider);
+      if (elements.mapSourcePopover.contains(button)) setMapSourceOpen(false);
+    });
   });
 
   elements.viewSwitcher?.addEventListener("click", (event) => {
@@ -4042,20 +4148,18 @@ async function init() {
 
   wireUi();
   wireMap();
+  const requestParameters = new URLSearchParams(window.location.search);
+  const requestedMapPack = requestParameters.get("pack");
+  const requestedCoveragePack = requestParameters.get("coverage");
+  if (requestedCoveragePack) locateRegionPack(requestedCoveragePack);
   window.addEventListener("storage", (event) => {
     if (event.key === "giss-resource-revision" && event.newValue) {
       refreshMapPackStateFromResources();
     }
   });
   await checkServices();
-  const requestParameters = new URLSearchParams(window.location.search);
-  const requestedMapPack = requestParameters.get("pack");
-  const requestedCoveragePack = requestParameters.get("coverage");
   if (requestedMapPack) {
     window.setTimeout(() => activateRegionPack(requestedMapPack), 500);
-  }
-  if (requestedCoveragePack) {
-    window.setTimeout(() => locateRegionPack(requestedCoveragePack), 500);
   }
   window.setInterval(checkServices, 60_000);
 }
