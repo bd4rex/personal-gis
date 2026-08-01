@@ -38,10 +38,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   await locate.click();
 
   await page.waitForURL("**/?coverage=gf-japan");
-  await page.locator("#coveragePrompt").waitFor({ state: "visible" });
-  if (!(await page.locator("#coveragePromptTitle").textContent()).includes("日本")) {
-    throw new Error("World-map region prompt did not retain the selected Japan package.");
-  }
+  await page.waitForFunction(() => document.querySelector("#coveragePromptTitle")?.textContent.includes("日本") && !document.querySelector("#coveragePrompt")?.hidden, null, { timeout: 30000 });
   const overview = await page.evaluate(async () => {
     const image = new Image();
     image.src = "/assets/overview/gray-earth.jpg?v=mercator-4096-20260801";
@@ -54,17 +51,33 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.screenshot({ path: path.join(outputDir, "world-region-prompt.png") });
 
   await page.locator("#onlineMapShortcut").click();
+  await page.locator("#mapSourcePopover").waitFor({ state: "visible" });
+  const japanCoverage = await page.locator("#mapCoverageStatus").textContent();
+  if (!japanCoverage.includes("日本") || !japanCoverage.includes("未安装")) {
+    throw new Error(`Map source control did not reflect Japan offline coverage: ${japanCoverage}`);
+  }
+  await page.screenshot({ path: path.join(outputDir, "map-source-menu-japan.png") });
+  await page.locator('#mapSourcePopover [data-online-provider="osm"]').click();
   if (await page.locator("#onlineMapShortcut").getAttribute("aria-pressed") !== "true") {
     throw new Error("Online OSM view did not become active.");
   }
   await page.waitForFunction(() => document.querySelector("#onlineMapShortcut")?.title.includes("已连接"), null, { timeout: 15000 });
+  const toastBox = await page.locator("#toast").boundingBox();
+  const shortcutBox = await page.locator("#onlineMapShortcut").boundingBox();
+  if (toastBox && shortcutBox) {
+    const overlaps = toastBox.x < shortcutBox.x + shortcutBox.width
+      && toastBox.x + toastBox.width > shortcutBox.x
+      && toastBox.y < shortcutBox.y + shortcutBox.height
+      && toastBox.y + toastBox.height > shortcutBox.y;
+    if (overlaps) throw new Error("Map source toast overlaps the source shortcut.");
+  }
   await page.screenshot({ path: path.join(outputDir, "world-region-online.png") });
 
   await page.locator('[data-tab="layers"]').click();
-  await page.locator('[data-online-provider="openfreemap"]').click();
+  await page.locator('[data-tab-panel="layers"] [data-online-provider="openfreemap"]').click();
   await page.waitForFunction(() => document.querySelector("#onlineMapShortcut")?.title.includes("OpenFreeMap") && document.querySelector('[data-online-provider="openfreemap"]')?.classList.contains("active"), null, { timeout: 25000 });
   await page.screenshot({ path: path.join(outputDir, "world-region-openfreemap.png") });
-  await page.locator('[data-online-provider="osm"]').click();
+  await page.locator('[data-tab-panel="layers"] [data-online-provider="osm"]').click();
   await page.waitForFunction(() => document.querySelector("#onlineMapShortcut")?.title.includes("OSM 标准地图已连接"), null, { timeout: 15000 });
 
   await page.locator("#coverageDownloadButton").click();
@@ -74,9 +87,11 @@ fs.mkdirSync(outputDir, { recursive: true });
     throw new Error("World-map download prompt did not hand off to the selected offline package.");
   }
 
-  await page.goto(`${baseUrl}/`, { waitUntil: "load" });
+  await page.goto(`${baseUrl}/?coverage=jiangsu`, { waitUntil: "load" });
   await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector("#mapCoverageStatus")?.textContent.includes("江苏省已安装并启用"), null, { timeout: 15000 });
   await page.locator("#onlineMapShortcut").click();
+  await page.locator('#mapSourcePopover [data-online-provider="offline"]').click();
   if (await page.locator("#onlineMapShortcut").getAttribute("aria-pressed") !== "false") {
     throw new Error("Online OSM view did not turn off.");
   }
@@ -89,7 +104,10 @@ fs.mkdirSync(outputDir, { recursive: true });
   });
   await fallbackPage.goto(`${baseUrl}/?coverage=gf-japan`, { waitUntil: "load" });
   await fallbackPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 15000 });
-  await fallbackPage.waitForFunction(() => document.querySelector("#onlineMapShortcut")?.title.includes("开放矢量"), null, { timeout: 25000 });
+  await fallbackPage.waitForFunction(() => {
+    const shortcut = document.querySelector("#onlineMapShortcut");
+    return shortcut?.title.includes("OpenFreeMap") && shortcut.classList.contains("fallback");
+  }, null, { timeout: 25000 });
   if (!(await fallbackPage.locator("#onlineMapShortcut").evaluate((button) => button.classList.contains("fallback")))) {
     throw new Error("OSM failure did not switch to the OpenFreeMap vector fallback.");
   }
@@ -104,7 +122,10 @@ fs.mkdirSync(outputDir, { recursive: true });
     localStorage.setItem("giss-online-provider", "osm");
   });
   await degradedPage.goto(`${baseUrl}/?coverage=gf-japan`, { waitUntil: "load" });
-  await degradedPage.waitForFunction(() => document.querySelector("#onlineMapShortcut")?.title.includes("离线概览兜底"), null, { timeout: 25000 });
+  await degradedPage.waitForFunction(() => {
+    const shortcut = document.querySelector("#onlineMapShortcut");
+    return shortcut?.title.includes("在线不可用") && shortcut.classList.contains("degraded");
+  }, null, { timeout: 25000 });
   if (!(await degradedPage.locator("#onlineMapShortcut").evaluate((button) => button.classList.contains("degraded")))) {
     throw new Error("Failure of both online providers did not expose the offline overview fallback state.");
   }
@@ -136,9 +157,24 @@ fs.mkdirSync(outputDir, { recursive: true });
     throw new Error("Taipei is not distinguished from Fujian by the offline package boundaries.");
   }
 
+  const taiwanPage = await browser.newPage({ viewport: { width: 760, height: 900 } });
+  await taiwanPage.goto(`${baseUrl}/?coverage=gf-taiwan`, { waitUntil: "load" });
+  await taiwanPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 30000 });
+  const taiwanPrompt = await taiwanPage.locator("#coveragePromptTitle").textContent();
+  if (!taiwanPrompt.includes("台湾") || /Taiwan/i.test(taiwanPrompt)) {
+    throw new Error(`Taiwan offline prompt was not localized: ${taiwanPrompt}`);
+  }
+  await taiwanPage.locator("#onlineMapShortcut").click();
+  const taiwanCoverage = await taiwanPage.locator("#mapCoverageStatus").textContent();
+  if (!taiwanCoverage.includes("台湾") || !taiwanCoverage.includes("未安装")) {
+    throw new Error(`Map source coverage did not refresh for Taiwan: ${taiwanCoverage}`);
+  }
+  await taiwanPage.screenshot({ path: path.join(outputDir, "map-source-menu-taiwan.png") });
+  await taiwanPage.close();
+
   await browser.close();
   if (errors.length) throw new Error(errors.join("\n"));
-  console.log("World map smoke test passed: manual providers, automatic fallback, and offline package handoff.");
+  console.log("World map smoke test passed: source menu, live offline coverage, localized prompts, automatic fallback, and package handoff.");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -7,7 +7,7 @@
     <title>GISS 个人离线地图</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css" />
-    <link rel="stylesheet" href="/src/app.css?v=20260801-1" />
+    <link rel="stylesheet" href="/src/app.css?v=20260802-1" />
   </head>
   <body>
     <div id="map" aria-label="个人离线地图"></div>
@@ -41,8 +41,9 @@
 
     <div id="mapShortcuts" class="map-shortcuts">
       <div class="map-shortcut-controls" role="group" aria-label="地图快捷工具">
-        <button id="onlineMapShortcut" class="map-shortcut-button" type="button" title="在线标准地图" aria-label="在线标准地图" aria-pressed="false">
+        <button id="onlineMapShortcut" class="map-shortcut-button" type="button" title="地图来源" aria-label="地图来源" aria-pressed="false" aria-expanded="false" aria-controls="mapSourcePopover">
           <i data-lucide="wifi"></i>
+          <span class="map-source-indicator" aria-hidden="true"></span>
         </button>
         <button id="contourShortcut" class="map-shortcut-button" type="button" title="等高线" aria-label="等高线" aria-pressed="false">
           <i data-lucide="mountain-snow"></i>
@@ -51,6 +52,38 @@
           <i data-lucide="list"></i>
         </button>
       </div>
+      <aside id="mapSourcePopover" class="map-source-popover" aria-label="地图来源" hidden>
+        <header>
+          <span class="map-source-heading">
+            <strong>地图来源</strong>
+            <small id="mapSourceStatus">正在检查当前底图</small>
+          </span>
+          <button id="mapSourceCloseButton" class="icon-button compact" type="button" title="关闭地图来源" aria-label="关闭地图来源">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <div class="map-source-options" role="radiogroup" aria-label="选择地图来源">
+          <button type="button" role="radio" data-online-provider="offline">
+            <i data-lucide="hard-drive"></i>
+            <span><strong>仅离线</strong><small>已安装区域包与全球概览</small></span>
+            <i class="map-source-check" data-lucide="check"></i>
+          </button>
+          <button type="button" role="radio" data-online-provider="osm">
+            <i data-lucide="map"></i>
+            <span><strong>OSM 标准</strong><small>接近 openstreetmap.org 的在线样式</small></span>
+            <i class="map-source-check" data-lucide="check"></i>
+          </button>
+          <button type="button" role="radio" data-online-provider="openfreemap">
+            <i data-lucide="layers-3"></i>
+            <span><strong>OpenFreeMap</strong><small>开放矢量在线地图</small></span>
+            <i class="map-source-check" data-lucide="check"></i>
+          </button>
+        </div>
+        <div class="map-source-coverage">
+          <i data-lucide="map-pinned"></i>
+          <span><small>当前位置离线覆盖</small><strong id="mapCoverageStatus">正在识别区域</strong></span>
+        </div>
+      </aside>
       <aside id="legendPopover" class="legend-popover" aria-label="地图图例" hidden>
         <header>
           <strong>图例</strong>
@@ -272,10 +305,10 @@
     <aside id="coveragePrompt" class="coverage-prompt" aria-live="polite" hidden>
       <span class="coverage-prompt-icon"><i data-lucide="map-pinned"></i></span>
       <span class="coverage-prompt-copy">
-        <strong id="coveragePromptTitle">此区域尚未离线安装</strong>
-        <span id="coveragePromptText">断网前可在资源管理中构建此区域包。</span>
+        <strong id="coveragePromptTitle">此区域未安装离线地图</strong>
+        <span id="coveragePromptText">可在资源管理中下载此区域。</span>
       </span>
-      <button id="coverageDownloadButton" class="command-button primary" type="button"><i data-lucide="download"></i><span>下载区域</span></button>
+      <button id="coverageDownloadButton" class="command-button primary" type="button"><i data-lucide="download"></i><span>下载离线地图</span></button>
       <button id="coverageCloseButton" class="icon-button compact" type="button" title="关闭提示" aria-label="关闭区域提示"><i data-lucide="x"></i></button>
     </aside>
 
@@ -429,6 +462,6 @@
     <script src="/vendor/maplibre-contour/index.min.js"></script>
     <script src="/vendor/lucide/lucide.min.js"></script>
     <script src="/src/map-style.js?v=20260801-1"></script>
-    <script type="module" src="/src/app.js?v=20260801-6"></script>
+    <script type="module" src="/src/app.js?v=20260802-1"></script>
   </body>
 </html>

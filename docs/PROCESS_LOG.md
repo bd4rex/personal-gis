@@ -354,3 +354,11 @@ Four recovery defects were found and fixed during the proof:
 - Corrected the smoke test's regional assumption: shared search/route coverage is compared with every enabled installed map pack, including global country packs, rather than only Chinese provinces.
 - Diagnosed an incomplete Nominatim import: 33.7 million `placex` rows existed, but database version metadata and the two search-vector GIN indexes were missing. PostgreSQL statistics were refreshed and Nominatim `db-postprocess` was resumed in place. The final self-check passed database version, content, tokenizer, indexing status, index completeness, and index validity.
 - Re-ran health, full API/data lifecycle smoke, world-map Playwright, main UI Playwright, and standalone resource-console Playwright tests. All passed after updating browser assertions for asynchronous verification and realistic cold-start rendering time.
+
+## 2026-08-02: Map-source control and live coverage state
+
+- Replaced the WiFi shortcut's binary toggle with an adjacent source menu for offline-only, OSM Standard, and OpenFreeMap. The control shows the preferred choice, actual fallback source, connection state, and current offline coverage without colliding with transient notifications.
+- Changed browsing-region detection from MapLibre's padding-shifted camera center to the center of the unobstructed map area between active panels. Focusing Jiangsu now reports Jiangsu instead of the adjacent Anhui package, while ordinary pan/zoom updates remain live.
+- Added package-bounds prefiltering before polygon checks, preventing unrelated boundary data from matching distant viewports. Coverage URL targets are also applied before the first generic prompt can appear.
+- Localized country prompts through ISO region names with explicit Chinese fallbacks for Japan, Taiwan, Hong Kong, and Macao. User-facing copy now consistently says **download offline map** instead of exposing build-pipeline terminology.
+- Expanded the world-map Playwright suite across Japan, Jiangsu, and Taiwan, plus toast/shortcut overlap, all three manual sources, OSM-to-OpenFreeMap fallback, and full offline degradation. Health, API lifecycle, resource-console, main UI, and targeted world-map tests all passed.

@@ -15,7 +15,7 @@ flowchart LR
   Nginx --> Web["Static UI, glyphs, sprites"]
   Nginx --> PM["Selected regional PMTiles"]
   Nginx --> Overview["Local Natural Earth world overview"]
-  Browser -. "explicit online toggle" .-> OSMTiles["OpenStreetMap Standard raster"]
+  Browser -. "explicit source selector" .-> OSMTiles["OpenStreetMap Standard raster"]
   Nginx --> API["FastAPI"]
   Nginx --> Martin["Martin vector tiles"]
   Nginx --> Kiwix["Kiwix encyclopedia + travel guide"]
@@ -54,7 +54,9 @@ A province is independently installed only after its PMTiles and manifest both p
 
 `GET /api/resources` is the local inventory boundary. It combines disk capacity, filesystem usage, PostGIS size, regional pack state, shared search/route coverage, recovery-kit usage, and semantic update checks. With `check_upstream=true`, the API compares installed source sequence/timestamp metadata with trusted provider state files and caches the result. The browser presents that information as **Available**, **Local**, and **Updates** views. Jobs can be queued, cancelled, or retried, while heavy index rebuilds remain explicit and never enter the regular automatic batch.
 
-The always-installed Natural Earth layers provide a zoomed-out offline world. When the camera is outside installed PMTiles coverage, catalog bounds resolve the smallest matching downloadable package and present it as an ownership choice. The user can locate that package, open its build details, or explicitly enable an online OpenStreetMap Standard raster for current-viewport reference. The raster is visually above local base layers but below personal, weather, nautical, and terrain overlays. It is never used as a package source and is not bulk-cached.
+The always-installed Natural Earth layers provide a zoomed-out offline world. Offline coverage is resolved at the center of the unobstructed map area, accounting for side/detail panels instead of trusting MapLibre's padding-shifted camera center. Package bounds are used as a fast mandatory prefilter before exact polygon boundaries, preventing a malformed or unrelated boundary from claiming a distant viewport. Outside installed PMTiles coverage, the smallest matching downloadable package is presented as an ownership choice with a localized name.
+
+The map-source control separates the preferred provider from the source that is actually rendering. It offers offline-only, OpenStreetMap Standard raster, and OpenFreeMap vector modes; source load/error events drive loading, connected, fallback, and degraded states. Online layers remain above local base layers but below personal, weather, nautical, and terrain overlays. They are never used as package sources and are not bulk-cached.
 
 ### Personal source of truth
 

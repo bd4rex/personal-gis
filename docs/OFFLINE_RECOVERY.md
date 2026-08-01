@@ -75,7 +75,7 @@ Open `http://localhost:8080/` only after the health check succeeds.
 9. Search a complete address, reverse-check a map point, and plan one short car/walk route.
 10. Enable terrain and emergency facilities, then open `/wiki/` while external networking is disabled.
 
-The **View online** action is expected to be unavailable or blank during a disconnected recovery. This is not an offline failure: the Natural Earth overview, installed PMTiles, personal data, local search/route indexes, terrain already owned on disk, and Kiwix content remain local. Offline expansion uses an already archived PBF or a restored kit; it does not rely on the OpenStreetMap Standard tile service.
+The **OSM Standard** and **OpenFreeMap** source choices are expected to be unavailable or blank during a disconnected recovery. This is not an offline failure: the Natural Earth overview, installed PMTiles, personal data, local search/route indexes, terrain already owned on disk, and Kiwix content remain local. Offline expansion uses an already archived PBF or a restored kit; it does not rely on either online tile service.
 
 ## Restore without starting services
 
