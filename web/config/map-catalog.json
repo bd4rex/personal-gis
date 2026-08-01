@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 3,
+  "version": "2026-07-17-province-2",
+  "activeDataset": "jiangsu",
+  "datasets": [],
+  "limits": {
+    "minZoom": 1,
+    "maxZoom": 18,
+    "maxBounds": [[-179.999, -85.0], [179.999, 85.0]]
+  }
+}

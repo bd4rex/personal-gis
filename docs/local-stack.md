@@ -1,66 +1,37 @@
-# 本地 PostGIS + Martin + MapLibre 栈
+# 本地服务栈说明
 
-> 本页是快速摘要。完整信息见[技术架构与组合逻辑](architecture.md)、[资源与配置清单](resource-configuration.md)和[运行与验证手册](operations.md)。
+| 组件 | 作用 | 对宿主机开放 |
+| --- | --- | --- |
+| nginx | 地图入口、静态资源、PMTiles Range、API/Martin 反向代理 | `127.0.0.1:8080` |
+| MapLibre | 浏览器矢量地图渲染、图层和交互 | 通过 nginx |
+| PMTiles | 苏皖 OSM 参考底图单文件 | 通过 `/tiles/` |
+| FastAPI | 点位/轨迹/照片 CRUD、GPX、搜索、导出 | 不开放 |
+| PostGIS | 个人地理数据、空间索引、版本和审计 | 不开放 |
+| Martin | 只发布审核过的 PostGIS 地图视图 | 不开放 |
+| Nominatim | 完整地址搜索与反向地址查询 | 不开放 |
+| Valhalla | 驾车、骑行和步行离线路线 | 不开放 |
+| Kiwix | 本地中文维基百科 | 通过 `/wiki/` |
+| HGT / Terrarium | 点高程、路线剖面和地形阴影 | 通过 `/api/` |
 
-当前 MVP 范围只做江苏省和安徽省。
+## 为什么端口有时显示文字或 JSON
 
-## 组件作用
-
-| 组件 | 地址 | 作用 |
-|---|---|---|
-| PostGIS | `localhost:5432` | 长期保存个人点位、轨迹、照片路径、分类和备注 |
-| Martin | `http://localhost:3000` | 从 PostGIS 发布矢量瓦片，供 Web 地图读取 |
-| MapLibre 页面 | `http://localhost:8080/web/` | 浏览器地图界面，当前先读取 `data/places.geojson` |
-
-## 当前文件
-
-| 文件 | 作用 |
-|---|---|
-| `services/docker-compose.yml` | 启动 PostGIS 和 Martin |
-| `services/postgis/init.sql` | 初始化 `app.places` 表和苏皖示例点 |
-| `services/martin/config.yml` | 只允许 Martin 发布 `app.places_web` |
-| `data/places.geojson` | 静态预览用点位数据 |
-| `web/index.html` | MapLibre 地图页面 |
-| `scripts/start-web.ps1` | 启动本地静态 Web 服务 |
-| `scripts/start-services.ps1` | Docker 可用后启动 PostGIS/Martin |
-
-## 启动方式
-
-只启动 Web 静态预览：
-
-```powershell
-.\scripts\start-web.ps1
-```
-
-打开：
+过去分别打开 Martin、PostGIS 或静态服务器端口时，看到的是目录、JSON 或错误文字。现在统一入口后，日常只访问：
 
 ```text
-http://localhost:8080/web/
+http://localhost:8080/
 ```
 
-如果 `8080` 已被其他本地服务占用，可从项目根目录临时改用：
+其他路径是程序之间使用的接口。
 
-```powershell
-.\scripts\start-web.ps1 -Port 8081
-```
+## 为什么底图与个人数据分开
 
-并打开 `http://localhost:8081/web/`。
+OSM 底图是可再生的参考数据，更新时可以整体替换 PMTiles。个人点位、轨迹、照片和备注是不可替代的私人资产，保存在 PostGIS 和 `data/media`，通过独立备份保护。这样以后扩展到全球底图、换渲染器或增加路由服务时，不需要迁移个人数据。
 
-Docker Desktop 可用时，启动数据库和瓦片服务：
+## 当前限制
 
-```powershell
-.\scripts\start-services.ps1
-```
+- 高倍离线底图当前覆盖江苏、安徽、上海和浙江；
+- 地址与路线索引也只覆盖已安装区域包的合并范围，并非全球；
+- 中文百科采用 all-mini 快照，不包含完整多媒体资源；
+- 本机入口没有账号系统，只适合 localhost 单用户环境。
 
-当前 Compose 使用本地开发凭据 `gis/gis`，并将 5432、3000 映射到主机；不要直接用于公网或生产环境。
-
-## 数据范围
-
-地图初始视野和最大视野限定在江苏、安徽附近：
-
-```text
-经度：约 114.7 - 122.1
-纬度：约 29.3 - 35.4
-```
-
-后续可以接入 Geofabrik/BBBike 的江苏、安徽 OSM 数据，或者先继续使用在线 OSM 底图，只把个人标记数据放进 PostGIS。
+对应扩展方案见 `docs/ROADMAP.md`。

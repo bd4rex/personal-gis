@@ -1,0 +1,132 @@
+# Sources and Licenses
+
+This project combines open data and open-source software. Keep attribution visible and review upstream licenses before redistributing a data pack or bundled browser assets.
+
+## OpenStreetMap data
+
+Source mirror:
+
+- `https://download.openstreetmap.fr/extracts/asia/china/`
+- `https://download.openstreetmap.fr/polygons/asia/china/`
+- `https://download.geofabrik.de/asia/taiwan.html`
+- `https://download.geofabrik.de/index-v1-nogeom.json` (global region catalog)
+
+The mainland province maps are derived from one China snapshot and 33 province-level polygon boundaries. Taiwan uses a separately checksummed Geofabrik OSM PBF and polygon. OpenStreetMap data is available under the Open Database License (ODbL). The browser visibly credits OpenStreetMap contributors.
+
+Project and license information: `https://www.openstreetmap.org/copyright`
+
+### Optional OpenStreetMap Standard online view
+
+The browser can opt into `https://tile.openstreetmap.org/{z}/{x}/{y}.png` for temporary current-viewport reference browsing. It displays OpenStreetMap attribution, sends a normal origin referrer, and allows ordinary HTTP caching. The application does not prefetch, scrape, bulk-download, or turn this public service into offline packages. Offline ownership is implemented through provider PBF downloads and locally built PMTiles instead.
+
+Tile usage policy: `https://operations.osmfoundation.org/policies/tiles/`
+
+## Planetiler
+
+Project: `https://github.com/onthegomap/planetiler`
+
+Role: converts the merged regional OSM PBF into an OpenMapTiles-compatible PMTiles archive.
+
+The build image is pinned in `scripts/build-region-pack.ps1` by SHA256 digest.
+
+## OpenMapTiles schema
+
+Project: `https://github.com/openmaptiles/openmaptiles`
+
+Role: vector-layer schema consumed by the local map style. The browser attribution includes OpenMapTiles.
+
+## MapLibre GL JS
+
+Project: `https://github.com/maplibre/maplibre-gl-js`
+
+Local version: `5.6.0`.
+
+Role: browser vector-map renderer.
+
+## PMTiles
+
+Project: `https://github.com/protomaps/PMTiles`
+
+Local browser library version: `4.3.0`.
+
+Role: single-file vector-tile archive and browser range protocol.
+
+## MapLibre Contour
+
+Project: `https://github.com/onthegomap/maplibre-contour`
+
+Local version: `0.1.0` (BSD 3-Clause).
+
+Role: reads the locally served Terrarium DEM, smooths neighboring elevation tiles, and generates crisp vector contour lines and labels in a browser worker. The runtime makes no external terrain request.
+
+## OpenFreeMap style assets
+
+Project: `https://github.com/hyperknot/openfreemap-styles`
+
+Role: the local sprite sheet is used for POI symbols; the downloaded Liberty JSON is retained as a style reference. The runtime does not call the OpenFreeMap tile service.
+
+## Nominatim
+
+Project: `https://nominatim.org/`
+
+Container project: `https://github.com/mediagis/nominatim-docker`
+
+Role: imports `giss-core-latest.osm.pbf` for full local address search and reverse geocoding. The runtime image is pinned by digest. Nominatim is an index over OSM data; ODbL attribution and redistribution obligations still apply to the underlying database.
+
+## Valhalla and elevation
+
+Project: `https://github.com/valhalla/valhalla`
+
+Role: builds and serves local driving, cycling, and walking graph tiles from the shared OSM PBF. The scripted image is pinned by digest. Its downloaded HGT/SRTM-compatible tiles are stored under `products/routing/valhalla/elevation_data` and used for route elevation and terrain rendering. Preserve source provenance and review the elevation provider's terms before redistributing a kit outside personal use.
+
+## Natural Earth
+
+Source: `https://www.naturalearthdata.com/`
+
+Role: global low-zoom raster, country outlines, and major-place labels. Natural Earth data is public domain; the installed files and checksums are recorded in `web/assets/overview/overview.manifest.json`.
+
+## Open-Meteo
+
+Source: `https://open-meteo.com/`
+
+Role: refreshable seven-day snapshots for the current Jiangsu/Anhui city set. Weather data is attributed to Open-Meteo under CC BY 4.0 and stored with source URLs and checksums in `products/weather/weather.manifest.json`.
+
+## Kiwix, Wikipedia, and Wikivoyage ZIM
+
+Kiwix tools: `https://github.com/kiwix/kiwix-tools`
+
+Official ZIM catalog: `https://download.kiwix.org/zim/wikipedia/`
+Travel ZIM catalog: `https://download.kiwix.org/zim/wikivoyage/`
+
+Installed snapshot: `wikipedia_zh_all_mini_2026-05.zim`.
+Installed travel snapshot: `wikivoyage_zh_all_maxi_2026-06.zim`.
+
+Role: serves the local Chinese Wikipedia encyclopedia. `products/encyclopedia/encyclopedia.manifest.json` records the exact download URL, bytes, snapshot, and SHA256. Kiwix software and the ZIM's included content have their own licenses; Wikipedia article text is generally available under Creative Commons Attribution-ShareAlike and may also include separately licensed media. Preserve article attribution and license notices when redistributing content.
+
+## Glyphs and Noto Sans
+
+Glyph source: `https://github.com/maplibre/demotiles`
+
+The local cache contains Noto Sans Regular, Bold, and Italic glyph PBF ranges. `web/assets/glyphs/SIL Open Font License FOR MapLibre Noto Sans.txt` records the font license.
+
+## Lucide
+
+Project: `https://github.com/lucide-icons/lucide`
+
+Local version: `0.468.0`.
+
+Role: interface icons.
+
+## PostGIS, Martin, nginx, Python, and Playwright
+
+- PostGIS: `https://postgis.net/`
+- Martin: `https://github.com/maplibre/martin`
+- nginx: `https://nginx.org/`
+- Python: `https://www.python.org/`
+- Playwright: `https://playwright.dev/`
+
+Runtime/build image digests are recorded in `services/docker-compose.yml` and Dockerfiles. Python package versions are exact in `services/api/requirements.txt`.
+
+## Asset integrity record
+
+`scripts/download-web-assets.ps1` writes `runtime/web-assets-manifest.json` containing the relative path, byte count, and SHA256 for each locally downloaded browser asset. Preserve that manifest with an offline release bundle.

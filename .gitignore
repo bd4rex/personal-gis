@@ -1,33 +1,57 @@
-# Codex/session working files may contain private conversation context.
+# Large local map data and generated products
+raw/
+products/
+tmp/
+runtime/
+backups/
+offline-kit/
+/tools/
+qgis/
 gao/
 
-# Local secrets and machine-specific overrides.
-.env
-.env.*
-!.env.example
-*.local
-
-# Personal/raw GIS data. Keep the small demo GeoJSON in data/places.geojson.
-data/imports/**
-data/photos/**
-data/basemaps/**
-backups/
-*.dump
-*.gpkg
-*.gpkg-*
-*.mbtiles
+# GIS payloads should be rebuilt or downloaded, not committed.
+*.osm.pbf
 *.pmtiles
-*.obf
-*.gpx
+*.mbtiles
+*.gpkg
+*.sqlite
+*.zip
+*.gz
 
-# Local QGIS caches and user state; project definitions may still be committed.
-*.qgd
-*.qgd-shm
-*.qgd-wal
-.qgis/
+# Local generated web assets. Recreate with scripts/download-web-assets.ps1.
+web/vendor/*
+web/assets/glyphs/*
+web/assets/sprites/*
+web/styles/liberty/openfreemap-liberty.json
 
-# Common generated files.
+# Keep directory anchors.
+!web/vendor/.gitkeep
+!web/assets/glyphs/.gitkeep
+!web/assets/sprites/.gitkeep
+!web/styles/
+!web/styles/liberty/
+!web/styles/liberty/.gitkeep
+
+# Local personal imports and media
+data/photos/
+data/imports/
+
+# Python bytecode and local caches
 __pycache__/
 *.py[cod]
-.DS_Store
+data/basemaps/
+
+# OS / editor
 Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Local credentials and generated service state
+services/.env
+data/media/
+data/exports/
+data/imports/
+data/terrain-cache/
+data/maintenance/

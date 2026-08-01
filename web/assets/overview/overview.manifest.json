@@ -1,0 +1,28 @@
+{
+    "schemaVersion":  1,
+    "generatedAt":  "2026-08-01T16:09:53.7330594Z",
+    "snapshot":  "Natural Earth 5.1 / raster 3.2",
+    "sourceUrls":  [
+                       "https://naturalearth.s3.amazonaws.com/50m_raster/GRAY_50M_SR_OB.zip",
+                       "https://github.com/nvkelso/natural-earth-vector"
+                   ],
+    "bytes":  2299420,
+    "files":  [
+                  {
+                      "name":  "countries.geojson",
+                      "bytes":  838726,
+                      "sha256":  "6866c877d39cba9c357620878839b336d569f8c662d3cfab4cb1dbe2d39c977f"
+                  },
+                  {
+                      "name":  "gray-earth.jpg",
+                      "bytes":  1294623,
+                      "sha256":  "f7dc66608e4a3f78305e4a4e9d321796a7f51901798cdfe92118c274d2e4727a"
+                  },
+                  {
+                      "name":  "places.geojson",
+                      "bytes":  166071,
+                      "sha256":  "0dbd25c9ad8bd797ddf164b067f563be5c16be2c002254eb594862377963f9dc"
+                  }
+              ],
+    "attribution":  "Made with Natural Earth"
+}

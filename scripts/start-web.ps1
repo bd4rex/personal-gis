@@ -1,19 +1,20 @@
-param(
-  [ValidateRange(1, 65535)]
-  [int]$Port = 8080,
-
-  [ValidateNotNullOrEmpty()]
-  [string]$BindAddress = "127.0.0.1"
-)
-
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
+$services = Join-Path $root "services"
 
-if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
-  throw "Port $Port is already in use. Choose another port, for example: .\scripts\start-web.ps1 -Port 8081"
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  throw "Docker was not found on PATH. Install Docker Desktop, then run this script again."
 }
 
-Set-Location $root
-Write-Host "Web: http://${BindAddress}:$Port/web/"
-python -m http.server $Port --bind $BindAddress
+Push-Location $services
+try {
+  docker compose up -d web
+  if ($LASTEXITCODE -ne 0) { throw "Could not start the web service." }
+}
+finally {
+  Pop-Location
+}
+
+Write-Host ""
+Write-Host "Web: http://localhost:8080/"

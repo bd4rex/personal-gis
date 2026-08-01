@@ -1,39 +1,213 @@
-name: personal-gis
-
 services:
   postgis:
-    image: postgis/postgis:16-3.5
-    container_name: personal-gis-postgis
-    restart: unless-stopped
+    image: postgis/postgis@sha256:1d95a92144c40198b46908fd92ac365e85d35eaf31bfc36f06c2c09a090c0538
+    container_name: giss-postgis
     environment:
       POSTGRES_DB: personal_gis
       POSTGRES_USER: gis
-      POSTGRES_PASSWORD: gis
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Create services/.env from services/.env.example}
+      TZ: Asia/Shanghai
     volumes:
-      - postgis_data:/var/lib/postgresql/data
-      - ./postgis/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - giss_postgis_data:/var/lib/postgresql/data
+      - ./postgis/migrations:/docker-entrypoint-initdb.d:ro
+      - ./postgis/migrations:/migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gis -d personal_gis"]
       interval: 5s
       timeout: 5s
       retries: 20
+    restart: unless-stopped
 
   martin:
-    image: ghcr.io/maplibre/martin:1.11.0
-    container_name: personal-gis-martin
-    restart: unless-stopped
+    image: ghcr.io/maplibre/martin@sha256:0650e9025f5fcffdc686358114679421b5e6b0ca37b374ad8a66f14709d59d2b
+    container_name: giss-martin
     depends_on:
       postgis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://gis:gis@postgis:5432/personal_gis
-    command: ["--config", "/config.yml"]
+      DATABASE_URL: postgres://gis:${POSTGRES_PASSWORD}@postgis:5432/personal_gis
+      TZ: Asia/Shanghai
+    command: ["--config", "/config/config.yaml"]
     volumes:
-      - ./martin/config.yml:/config.yml:ro
+      - ./martin/config.yaml:/config/config.yaml:ro
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/catalog"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: giss-api:1
+    build:
+      context: ./api
+    container_name: giss-api
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://gis:${POSTGRES_PASSWORD}@postgis:5432/personal_gis
+      MEDIA_ROOT: /data/media
+      EXPORT_ROOT: /data/exports
+      BACKUP_ROOT: /data/backups
+      OFFLINE_KIT_ROOT: /data/offline-kit
+      MAP_CATALOG_PATH: /data/map-catalog.json
+      REGION_CATALOG_PATH: /data/region-catalog.json
+      WORLD_REGION_CATALOG_PATH: /data/world-region-catalog.json
+      MAP_PACK_ROOT: /data/map-packs
+      OSM_ROOT: /data/osm
+      OSM_STATE_PATH: /data/china.state.txt
+      CAPABILITY_MANIFEST_PATH: /data/giss-core.manifest.json
+      NOMINATIM_URL: http://nominatim:8080
+      VALHALLA_URL: http://valhalla:8002
+      KIWIX_URL: http://kiwix:8080
+      ELEVATION_ROOT: /data/elevation
+      TERRAIN_CACHE_ROOT: /data/terrain-cache
+      BUILD_CACHE_ROOT: /data/build-cache
+      OSM_RESOURCE_ROOT: /data/osm-resources
+      ROUTING_RESOURCE_ROOT: /data/routing-resources
+      ENCYCLOPEDIA_RESOURCE_ROOT: /data/encyclopedia-resources
+      WEB_RESOURCE_ROOT: /data/web-resources
+      WEATHER_RESOURCE_ROOT: /data/weather-resources
+      NAUTICAL_RESOURCE_ROOT: /data/nautical-resources
+      OVERVIEW_RESOURCE_ROOT: /data/overview-resources
+      MAINTENANCE_ROOT: /data/maintenance
+      TZ: Asia/Shanghai
+    volumes:
+      - ../data/media:/data/media
+      - ../data/exports:/data/exports
+      - ../backups:/data/backups:ro
+      - ../offline-kit:/data/offline-kit:ro
+      - ../web/config/map-catalog.json:/data/map-catalog.json:ro
+      - ../web/config/region-catalog.json:/data/region-catalog.json:ro
+      - ../web/config/world-region-catalog.json:/data/world-region-catalog.json:ro
+      - ../products/tiles/pmtiles:/data/map-packs:ro
+      - ../raw/osm:/data/osm:ro
+      - ../raw/osm/china/china.state.txt:/data/china.state.txt:ro
+      - ../raw/osm/china/giss-core.manifest.json:/data/giss-core.manifest.json:ro
+      - ../products/routing/valhalla/elevation_data:/data/elevation:ro
+      - ../data/terrain-cache:/data/terrain-cache
+      - ../tmp:/data/build-cache
+      - ../raw/osm:/data/osm-resources:ro
+      - ${VALHALLA_DATA_PATH:-../products/routing/valhalla}:/data/routing-resources:ro
+      - ../products/encyclopedia:/data/encyclopedia-resources:ro
+      - ../web:/data/web-resources:ro
+      - ../products/weather:/data/weather-resources:ro
+      - ../products/nautical:/data/nautical-resources:ro
+      - ../web/assets/overview:/data/overview-resources:ro
+      - ../data/maintenance:/data/maintenance
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  nominatim:
+    profiles: ["advanced"]
+    image: mediagis/nominatim@sha256:7923a8e67197fc6d4f4ecb7c0e8bbedffeddcfdf4519596fe946e46a28f5a9f8
+    container_name: giss-nominatim
+    shm_size: 2gb
+    environment:
+      PBF_PATH: /data/giss-core-latest.osm.pbf
+      UPDATE_MODE: none
+      FREEZE: "true"
+      IMPORT_STYLE: extratags
+      IMPORT_WIKIPEDIA: "false"
+      THREADS: "4"
+      GUNICORN_WORKERS: "2"
+      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:?Run start-giss.cmd to create the local Nominatim password}
+      POSTGRES_SHARED_BUFFERS: 2GB
+      POSTGRES_MAINTENANCE_WORK_MEM: 3GB
+      POSTGRES_AUTOVACUUM_WORK_MEM: 512MB
+      POSTGRES_WORK_MEM: 32MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 8GB
+      POSTGRES_MAX_WAL_SIZE: 2GB
+      TZ: Asia/Shanghai
+    volumes:
+      - giss_nominatim_data:/var/lib/postgresql/16/main
+      - ../raw/osm/china:/data:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/status | grep -q OK"]
+      interval: 30s
+      timeout: 10s
+      retries: 120
+      start_period: 10m
+    restart: unless-stopped
+
+  valhalla:
+    profiles: ["advanced"]
+    image: ghcr.io/valhalla/valhalla-scripted@sha256:3d7a08f7e78b356ee873b61711b743ad81bcc114b0ca5731217da8bba6ba39d1
+    container_name: giss-valhalla
+    environment:
+      use_tiles_ignore_pbf: "${VALHALLA_IGNORE_PBF:-True}"
+      force_rebuild: "${VALHALLA_FORCE_REBUILD:-False}"
+      build_elevation: "True"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_tar: "True"
+      server_threads: "4"
+      use_default_speeds_config: "True"
+      TZ: Asia/Shanghai
+    volumes:
+      - ${VALHALLA_DATA_PATH:-../products/routing/valhalla}:/custom_files
+    expose:
+      - "8002"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/status >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 120
+      start_period: 10m
+    restart: unless-stopped
+
+  kiwix:
+    profiles: ["advanced"]
+    image: ghcr.io/kiwix/kiwix-serve@sha256:57baa553c46cd30770905df15a9a687258aa5471c30c8edaefe278f1784e1aa8
+    container_name: giss-kiwix
+    command: ["--urlRootLocation=/wiki", "--blockexternal", "wikipedia_zh_all_mini_2026-05.zim", "wikivoyage_zh_all_maxi_2026-06.zim"]
+    environment:
+      PORT: "8080"
+      TZ: Asia/Shanghai
+    volumes:
+      - ../products/encyclopedia:/data:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/wiki/"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    container_name: giss-web
+    depends_on:
+      martin:
+        condition: service_healthy
+      api:
+        condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ../web:/usr/share/nginx/html:ro
+      - ../products/tiles/pmtiles:/srv/pmtiles:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 
 volumes:
-  postgis_data:
+  giss_postgis_data:
+  giss_nominatim_data:
+    name: ${NOMINATIM_VOLUME_NAME:-services_giss_nominatim_data}

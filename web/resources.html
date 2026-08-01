@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f5f2" />
+    <title>资源与版本 - GISS</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/resources.css?v=20260731-1" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="icon-button" href="/" title="返回地图" aria-label="返回地图"><i data-lucide="arrow-left"></i></a>
+      <div class="app-title">
+        <h1>资源与版本</h1>
+        <p>离线地图的数据控制台</p>
+      </div>
+      <span id="workerState" class="status-pill neutral">正在连接</span>
+      <button id="refreshButton" class="icon-button" type="button" title="刷新本地状态" aria-label="刷新本地状态">
+        <i data-lucide="refresh-cw"></i>
+      </button>
+      <button id="upstreamButton" class="command-button" type="button">
+        <i data-lucide="cloud-download"></i><span>检查上游</span>
+      </button>
+    </header>
+
+    <section class="storage-strip" aria-label="磁盘空间">
+      <div class="storage-copy">
+        <strong id="storageFree">读取磁盘空间</strong>
+        <span id="storageMeta">GISS 资源盘点中</span>
+      </div>
+      <div class="storage-track"><span id="storageUsedBar"></span></div>
+      <div class="storage-key">
+        <span><i class="key-dot managed"></i><b id="managedSize">--</b> GISS 可计量</span>
+        <span><i class="key-dot disk"></i><b id="diskUsed">--</b> 磁盘已用</span>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="status" hidden></div>
+
+    <div class="workspace">
+      <aside class="section-nav">
+        <nav aria-label="资源管理视图">
+          <button class="active" type="button" data-view="versions">
+            <i data-lucide="git-compare-arrows"></i><span>地图版本</span><b id="versionBadge">--</b>
+          </button>
+          <button type="button" data-view="catalog">
+            <i data-lucide="map-plus"></i><span>添加区域</span><b id="catalogBadge">--</b>
+          </button>
+          <button type="button" data-view="local">
+            <i data-lucide="hard-drive"></i><span>本地资源</span><b id="localBadge">--</b>
+          </button>
+          <button type="button" data-view="tasks">
+            <i data-lucide="activity"></i><span>任务与更新</span><b id="taskBadge">--</b>
+          </button>
+        </nav>
+        <div class="nav-summary">
+          <span>当前源序列</span>
+          <strong id="sourceSequence">--</strong>
+          <small id="sourceTimestamp">尚未读取</small>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section id="versionsView" class="view active" aria-labelledby="versionsHeading">
+          <header class="view-header">
+            <div>
+              <h2 id="versionsHeading">地图版本</h2>
+              <p>所有已安装区域默认同时展示。版本操作只影响选中的地图包。</p>
+            </div>
+            <label class="search-field">
+              <i data-lucide="search"></i>
+              <input id="packSearch" type="search" placeholder="搜索区域" autocomplete="off" />
+            </label>
+          </header>
+          <div id="bulkToolbar" class="bulk-toolbar">
+            <label><input id="selectAllPacks" type="checkbox" /><span id="selectedLabel">选择地图包</span></label>
+            <div>
+              <button type="button" data-bulk-action="verify" disabled><i data-lucide="shield-check"></i><span>批量校验</span></button>
+              <button type="button" data-bulk-action="update" disabled><i data-lucide="refresh-cw"></i><span>批量更新</span></button>
+              <button type="button" data-bulk-action="remove" disabled><i data-lucide="trash-2"></i><span>批量移除</span></button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="version-table">
+              <thead>
+                <tr>
+                  <th class="select-column"></th>
+                  <th>地图包</th>
+                  <th>当前版本</th>
+                  <th>上游状态</th>
+                  <th>回退版本</th>
+                  <th>占用</th>
+                  <th class="actions-column">操作</th>
+                </tr>
+              </thead>
+              <tbody id="versionRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="catalogView" class="view" aria-labelledby="catalogHeading">
+          <header class="view-header">
+            <div>
+              <h2 id="catalogHeading">添加区域</h2>
+              <p>每个行政区域是独立地图包；构建时按其来源下载，不与相邻区域捆绑。</p>
+            </div>
+            <label class="search-field">
+              <i data-lucide="search"></i>
+              <input id="catalogSearch" type="search" placeholder="搜索省份、国家或地区" autocomplete="off" />
+            </label>
+          </header>
+          <div class="catalog-filter" role="group" aria-label="区域范围">
+            <button class="active" type="button" data-catalog-scope="recommended">中国省级</button>
+            <button type="button" data-catalog-scope="global">全球目录</button>
+          </div>
+          <div id="catalogResults" class="catalog-results"></div>
+        </section>
+
+        <section id="localView" class="view" aria-labelledby="localHeading">
+          <header class="view-header">
+            <div>
+              <h2 id="localHeading">本地资源</h2>
+              <p>当前产物、回退副本、共享源、旧数据和缓存分别计量。</p>
+            </div>
+          </header>
+          <div id="resourceSummary" class="metric-band"></div>
+          <div id="localGroups" class="resource-groups"></div>
+        </section>
+
+        <section id="tasksView" class="view" aria-labelledby="tasksHeading">
+          <header class="view-header">
+            <div>
+              <h2 id="tasksHeading">任务与更新</h2>
+              <p>每项独立显示阶段、进度和处理速率，取消操作跟随任务。</p>
+            </div>
+          </header>
+          <section class="task-section">
+            <div class="section-title"><h3>进行中</h3><span id="activeTaskCount">0 项</span></div>
+            <div id="activeTasks" class="task-list"></div>
+          </section>
+          <section class="task-section">
+            <div class="section-title"><h3>版本检查</h3><span id="updateCount">0 项可处理</span></div>
+            <div id="updateRows" class="update-list"></div>
+          </section>
+          <section class="task-section">
+            <div class="section-title"><h3>最近任务</h3><span>保留审计结果</span></div>
+            <div id="historyTasks" class="history-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="detailDialog">
+      <header>
+        <div><h2 id="detailTitle">地图版本</h2><p id="detailSubtitle"></p></div>
+        <button class="icon-button" type="button" data-close-dialog title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </header>
+      <div id="detailBody" class="dialog-body"></div>
+    </dialog>
+
+    <script src="/vendor/lucide/lucide.min.js"></script>
+    <script type="module" src="/src/resources.js?v=20260731-1"></script>
+  </body>
+</html>

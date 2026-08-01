@@ -1,0 +1,6 @@
+defusedxml==0.7.1
+fastapi==0.115.12
+pillow==11.2.1
+psycopg[binary,pool]==3.2.9
+python-multipart==0.0.20
+uvicorn==0.34.2
