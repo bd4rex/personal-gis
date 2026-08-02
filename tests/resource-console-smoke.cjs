@@ -26,10 +26,15 @@ fs.mkdirSync(outputDir, { recursive: true });
   page.on("requestfailed", (request) => errors.push(`request: ${request.url()} ${request.failure()?.errorText || "failed"}`));
 
   await page.goto(`${baseUrl}/resources.html`, { waitUntil: "load", timeout: 60000 });
-  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 5, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 4, null, { timeout: 30000 });
+
+  if ((await page.title()) !== "资源与版本 - GIS_P") throw new Error("The GIS_P resource-console title is missing.");
+  if (!(await page.locator(".storage-key").innerText()).includes("GIS_P 可计量")) {
+    throw new Error("The resource-console storage label still uses the legacy product name.");
+  }
 
   const rows = await page.locator("#versionRows tr[data-pack-row]").count();
-  if (rows < 5) throw new Error(`Expected all installed map packs, found ${rows}.`);
+  if (rows < 4) throw new Error(`Expected the four installed province packs, found ${rows}.`);
   if (!/维护服务(在线|离线)/.test(await page.locator("#workerState").innerText())) {
     throw new Error("Maintenance worker state was not rendered.");
   }

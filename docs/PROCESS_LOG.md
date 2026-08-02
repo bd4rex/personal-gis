@@ -2,7 +2,7 @@
 
 > Historical implementation narrative. Commands and ports in earlier sections describe the system at that point in time. Use `README.md` and the current operations/rebuild documents for active instructions.
 
-This is the implementation log for the Jiangsu/Anhui GISS MVP.
+This is the implementation log for the Jiangsu/Anhui GIS_P MVP.
 
 ## 2026-07-03
 
@@ -257,7 +257,7 @@ The installed Suwan and Huzhe regional PBFs are now verified against their manif
 
 Nominatim 5.3 was added as an advanced Compose service with a private PostgreSQL volume, complete address/reverse endpoints, and normalized results appended behind the existing search API. The lightweight 126,340-row index remains in PostGIS for fast nearby and emergency queries.
 
-Valhalla built 847 graph tiles and a 649,687,040-byte tile archive. It downloaded 58 one-degree HGT files totaling roughly 1.4 GiB. The GISS adapter decodes polyline6 to GeoJSON, exposes a stable route contract, samples a real elevation profile, and lets planned car/bicycle/walking routes be saved as personal tracks.
+Valhalla built 847 graph tiles and a 649,687,040-byte tile archive. It downloaded 58 one-degree HGT files totaling roughly 1.4 GiB. The GIS_P adapter decodes polyline6 to GeoJSON, exposes a stable route contract, samples a real elevation profile, and lets planned car/bicycle/walking routes be saved as personal tracks.
 
 MapLibre gained optional locally generated hillshade. The initial implementation performed a filesystem lookup per pixel and took about 60 seconds for a first tile; caching HGT resolution at the one-degree grid level reduced an uncached test tile to about 2.1 seconds and a cached tile to about 0.23 seconds.
 
@@ -333,7 +333,7 @@ Four recovery defects were found and fixed during the proof:
 - Reworked maintenance progress around individual resources. Detached summary-bar cancel buttons were removed; every active row now owns its stage, queue position or elapsed time, progress track, and cancel action. Normal update rows no longer show a fake percentage-like meter. FastAPI derives honest five-stage map progress from live job logs, and the browser no longer launches a costly full resource scan on every three-second status poll.
 - Added live throughput to those task rows without inventing unavailable measurements. Curl progress is parsed as bytes/second and received/total bytes; Planetiler archive progress is parsed as tiles/second, generated tiles, feature throughput, and staged output bytes. Historical Zhejiang output verified 1,500 tiles/second, 962,000 generated tiles, and a 482 MiB staged archive; browser fixtures cover the same rendering contract.
 - Removed the resource manager's all-or-nothing loading gate. Available regions now render from the loaded catalog, maintenance state and speed render independently, and the last complete local/update inventory is returned from a persistent cache before a background refresh. Thirteen independent storage roots are scanned with a bounded thread pool. On this machine a fresh inventory measured about 15.9 seconds and the cached response about 13 milliseconds, down from a roughly 57-second first display under active map generation.
-- Audited OsmAnd as a reference rather than a code donor. Its main code is GPLv3, while its UI/UX layouts and icons are separately CC BY-NC-ND 4.0. GISS adopts the resource taxonomy, workflow principles, cache-first behavior, and size-oriented local management with its own desktop UI and implementation; `docs/OSMAND_REFERENCE.md` records the boundary and follow-up backlog.
+- Audited OsmAnd as a reference rather than a code donor. Its main code is GPLv3, while its UI/UX layouts and icons are separately CC BY-NC-ND 4.0. GIS_P adopts the resource taxonomy, workflow principles, cache-first behavior, and size-oriented local management with its own desktop UI and implementation; `docs/OSMAND_REFERENCE.md` records the boundary and follow-up backlog.
 
 ## 2026-07-31: Update closure and world ownership transition
 
@@ -363,3 +363,11 @@ Four recovery defects were found and fixed during the proof:
 - Added package-bounds prefiltering before polygon checks, preventing unrelated boundary data from matching distant viewports. Coverage URL targets are also applied before the first generic prompt can appear.
 - Localized country prompts through ISO region names with explicit Chinese fallbacks for Japan, Taiwan, Hong Kong, and Macao. User-facing copy now consistently says **download offline map** instead of exposing build-pipeline terminology.
 - Expanded the world-map Playwright suite across Japan, Jiangsu, and Taiwan, plus toast/shortcut overlap, all three manual sources, OSM-to-OpenFreeMap fallback, and full offline degradation. Health, API lifecycle, resource-console, main UI, and targeted world-map tests all passed.
+
+## 2026-08-02: GIS_P product identity and default map workspace
+
+- Renamed the user-facing product from GISS to GIS_P across the map, resource console, API metadata, exported GPX files, command output, tests, and primary documentation.
+- Retained `D:\GISS`, `giss-*` Docker resources, `GISS_*` environment variables, browser storage keys, scheduled-task names, and offline-kit payload paths as compatibility identifiers so existing data and recovery kits remain usable.
+- Changed the map's first frame to start with the left side panel collapsed and inert. The shared side-panel state function now keeps animation, keyboard focus, ARIA state, toggle icon, coverage detection, and programmatic panel opening synchronized.
+- Rebuilt the API image and corrected the resource-console browser fixtures to expect the four truly installed independent province packs instead of a stale five-row assumption.
+- Split shared-index readiness into coverage completeness and exact scope freshness. The active four provinces remain searchable/routable when an older index contains harmless extra Germany coverage, while the resource manager still requires a rebuild; an index missing any enabled pack remains blocked.

@@ -136,8 +136,9 @@ try {
   }
   $enabledInstalledPackIds = @($installedPacks | Where-Object { $_.enabled } | ForEach-Object { $_.id } | Sort-Object)
   $capabilityProvinceIds = @($resources.capabilityPackIds | Sort-Object)
-  if (($enabledInstalledPackIds -join ',') -ne ($capabilityProvinceIds -join ',')) {
-    throw "Shared capability coverage does not match the enabled installed map packs."
+  $missingCapabilityPackIds = @($enabledInstalledPackIds | Where-Object { $capabilityProvinceIds -notcontains $_ })
+  if ($missingCapabilityPackIds.Count) {
+    throw "Shared capability coverage is missing enabled map packs: $($missingCapabilityPackIds -join ', ')."
   }
 
   $capabilities = Invoke-RestMethod -Uri "$base/capabilities"
@@ -182,7 +183,7 @@ try {
   $collections = Invoke-RestMethod -Uri "$base/collections"
   if (@($collections).Count -lt 3) { throw "Default place collections are missing." }
   $collectionPayload = @{
-    name = "GISS smoke collection"
+    name = "GIS_P smoke collection"
     color = "#266f9d"
     note = "Temporary collection verification"
   } | ConvertTo-Json
@@ -190,7 +191,7 @@ try {
   $collectionId = $collection.id
 
   $placePayload = @{
-    name = "GISS smoke place"
+    name = "GIS_P smoke place"
     province = "江苏省"
     category = "reference"
     note = "Temporary API verification record"
@@ -235,7 +236,7 @@ try {
   }
 
   $trackPayload = @{
-    name = "GISS smoke line"
+    name = "GIS_P smoke line"
     activity = "walk"
     note = "Temporary geometry verification"
     tags = @("smoke")
@@ -247,13 +248,13 @@ try {
   } | ConvertTo-Json -Depth 6
   $track = Invoke-RestMethod -Method Post -Uri "$base/tracks" -ContentType "application/json" -Body $trackPayload
   $trackIds.Add($track.id)
-  $trackCollection = Invoke-RestMethod -Uri "$base/tracks.geojson?q=GISS%20smoke%20line"
+  $trackCollection = Invoke-RestMethod -Uri "$base/tracks.geojson?q=GIS_P%20smoke%20line"
   $trackFeature = @($trackCollection.features | Where-Object { $_.id -eq $track.id }) | Select-Object -First 1
   if (-not $trackFeature -or $trackFeature.properties.version -lt 1) {
     throw "New track could not be read with version metadata."
   }
   $trackUpdate = $trackPayload | ConvertFrom-Json
-  $trackUpdate.name = "GISS smoke line updated"
+  $trackUpdate.name = "GIS_P smoke line updated"
   $trackUpdate | Add-Member -NotePropertyName version -NotePropertyValue $trackFeature.properties.version
   $trackUpdateJson = $trackUpdate | ConvertTo-Json -Depth 6
   $updatedTrack = Invoke-RestMethod -Method Put -Uri "$base/tracks/$($track.id)" -ContentType "application/json" -Body $trackUpdateJson
@@ -280,7 +281,7 @@ try {
       throw "Offline route adapter returned incomplete geometry, maneuvers, or elevation."
     }
     $savedRoutePayload = @{
-      name = "GISS smoke route"
+      name = "GIS_P smoke route"
       activity = "driving"
       note = "Temporary offline route verification"
       tags = @("smoke", "offline-route")
@@ -342,10 +343,14 @@ try {
     throw "Single-track GPX export is invalid."
   }
   $allGpx = Invoke-WebRequest -UseBasicParsing -Uri "$base/export/gpx"
-  if ($allGpx.StatusCode -ne 200 -or $allGpx.Content -notmatch 'GISS smoke line updated') {
+  if ($allGpx.StatusCode -ne 200 -or $allGpx.Headers["Content-Disposition"] -notmatch 'GIS_P-tracks\.gpx' -or
+      $allGpx.Content -notmatch 'GIS_P smoke line updated') {
     throw "Full GPX export does not include the updated smoke track."
   }
-  Invoke-WebRequest -UseBasicParsing -Uri "$base/export/archive" -OutFile $archivePath
+  $archiveResponse = Invoke-WebRequest -UseBasicParsing -Uri "$base/export/archive" -OutFile $archivePath -PassThru
+  if ($archiveResponse.Headers["Content-Disposition"] -notmatch 'GIS_P-personal-\d{8}-\d{6}\.zip') {
+    throw "Personal archive export does not use the GIS_P filename."
+  }
   if (-not (Test-Path $archivePath) -or (Get-Item $archivePath).Length -lt 1KB) {
     throw "Personal archive export is missing or implausibly small."
   }

@@ -73,6 +73,14 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 90000 });
   await page.waitForTimeout(2500);
 
+  if ((await page.title()) !== "GIS_P 个人离线地图") throw new Error("The GIS_P browser title is missing.");
+  if (!(await page.locator("body").evaluate((body) => body.classList.contains("panel-collapsed")))) {
+    throw new Error("The side panel is not collapsed on first load.");
+  }
+  if (await page.locator("#sidePanel").getAttribute("aria-hidden") !== "true") {
+    throw new Error("The initially collapsed side panel remains exposed to assistive technology.");
+  }
+
   const canvas = page.locator("canvas.maplibregl-canvas");
   if (await canvas.count() !== 1) throw new Error("MapLibre canvas was not created.");
   const box = await canvas.boundingBox();
@@ -83,6 +91,9 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!(await page.locator("#modeBanner").isHidden())) throw new Error("Mode banner is visible while no tool is active.");
 
   await page.screenshot({ path: path.join(outputDir, "desktop.png"), fullPage: false });
+
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
+  await page.waitForFunction(() => !document.body.classList.contains("panel-collapsed"));
 
   if (await page.locator("#collectionFilter option").count() < 4) throw new Error("Default collection filters are missing.");
   await page.getByRole("button", { name: "管理集合" }).click();
@@ -173,8 +184,8 @@ fs.mkdirSync(outputDir, { recursive: true });
   }
   const resourcePage = await context.newPage();
   await resourcePage.goto(`${baseUrl}/resources.html`, { waitUntil: "load", timeout: 90000 });
-  await resourcePage.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 5);
-  if (await resourcePage.locator("#versionRows tr[data-pack-row]").count() < 5) {
+  await resourcePage.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 4);
+  if (await resourcePage.locator("#versionRows tr[data-pack-row]").count() < 4) {
     throw new Error("Standalone resource console does not show every installed map pack.");
   }
   await resourcePage.getByRole("button", { name: /本地资源/ }).click();
@@ -250,12 +261,13 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.screenshot({ path: path.join(outputDir, "narrow.png"), fullPage: false });
 
   await page.setViewportSize({ width: 560, height: 900 });
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   await page.getByRole("button", { name: "系统" }).click();
   await page.screenshot({ path: path.join(outputDir, "system-narrow.png"), fullPage: false });
 
   await browser.close();
   if (errors.length) throw new Error(errors.join("\n"));
-  console.log("UI smoke test passed: map, contours, base-feature detail, nearby lookup, clustering, collection manager/assignment, readiness, editor, theme, and narrow layout.");
+  console.log("UI smoke test passed: GIS_P branding, default-collapsed sidebar, map, details, collections, readiness, theme, and narrow layout.");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

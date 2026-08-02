@@ -334,7 +334,7 @@
     return {
       style: {
         version: 8,
-        name: `GISS ${themeName}`,
+        name: `GIS_P ${themeName}`,
         glyphs: `${window.location.origin}/assets/glyphs/{fontstack}/{range}.pbf`,
         sprite: `${window.location.origin}/assets/sprites/ofm_f384/ofm`,
         sources,

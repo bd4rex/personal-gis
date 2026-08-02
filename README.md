@@ -1,6 +1,6 @@
-# GISS Personal Offline Map
+# GIS_P Personal Offline Map
 
-GISS is a local-first personal GIS with 34 Chinese province units and a synchronized global Geofabrik catalog. It combines an interactive offline OpenStreetMap base map with self-owned places, tracks, photos, full address search, route planning, terrain, weather, nautical references, a Chinese encyclopedia and travel guide, backup, and disconnected recovery.
+GIS_P is a local-first personal GIS with 34 Chinese province units and a synchronized global Geofabrik catalog. It combines an interactive offline OpenStreetMap base map with self-owned places, tracks, photos, full address search, route planning, terrain, weather, nautical references, a Chinese encyclopedia and travel guide, backup, and disconnected recovery.
 
 The browser only needs one local URL:
 
@@ -18,7 +18,7 @@ http://localhost:8080/resources.html
 
 ## 产品目标与核心需求
 
-GISS 的目标不是制作一张只能联网查看的地图，也不是复刻某一个移动应用，而是建立一套基于开放数据、个人可控、可持续更新，并能在长期断网后继续使用的全球地图系统。江苏、安徽是首批个人数据和离线能力的验证区域，架构与资源目录必须能够继续扩展到中国其他省份和全球。
+GIS_P 的目标不是制作一张只能联网查看的地图，也不是复刻某一个移动应用，而是建立一套基于开放数据、个人可控、可持续更新，并能在长期断网后继续使用的全球地图系统。江苏、安徽是首批个人数据和离线能力的验证区域，架构与资源目录必须能够继续扩展到中国其他省份和全球。
 
 ### 产品原则
 
@@ -51,6 +51,8 @@ GISS 的目标不是制作一张只能联网查看的地图，也不是复刻某
 - 备份和离线恢复包必须带 SHA256 清单，并能在无外网 Docker 网络中执行恢复演练。
 - 每次重要修改都应完成健康检查、API 生命周期测试和 Playwright 地图/资源界面测试，更新重建文档，并通过 PR 合并到 GitHub `main`。
 - 当前主项目位于 `D:\GISS`，Docker 数据位于 `D:\DockerData\wsl`；C 盘项目路径仅作为兼容 Junction，不保留第二份项目或 Docker 数据。
+
+`GIS_P` 是当前产品名称。为保证现有部署、备份和离线恢复包继续可用，`D:\GISS` 路径、`giss-*` Docker 名称、`GISS_UI_URL` 等环境变量、浏览器 `giss-*` 存储键以及计划任务名称暂时保留为兼容性标识，不代表旧品牌仍在界面中使用。
 
 ## Current system
 

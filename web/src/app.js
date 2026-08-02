@@ -962,7 +962,7 @@ function renderResourceManager() {
     const usedPercent = Number(storage.diskTotalBytes) > 0 ? Number(storage.diskUsedBytes) / Number(storage.diskTotalBytes) * 100 : 0;
     elements.resourceDiskFree.textContent = `${formatBytes(Number(storage.diskFreeBytes))} 可用`;
     elements.resourceDiskUsed.textContent = `磁盘已用 ${formatBytes(Number(storage.diskUsedBytes))}`;
-    elements.resourceManagedSize.textContent = `GISS 可计量 ${formatBytes(Number(storage.managedBytes))}`;
+    elements.resourceManagedSize.textContent = `GIS_P 可计量 ${formatBytes(Number(storage.managedBytes))}`;
     elements.resourceDiskUsedBar.style.width = `${Math.max(0, Math.min(100, usedPercent)).toFixed(1)}%`;
   }
   if (!state.resourceInventory && state.resourceTab === "download" && state.resourceCatalog && state.mapPacks.length) {
@@ -2012,7 +2012,7 @@ async function saveRouteTrack() {
       body: JSON.stringify({
         name: `${routePointLabel(start)} 至 ${routePointLabel(end)}`,
         activity: activities[state.route.costing],
-        note: "由 GISS 离线 Valhalla 路线引擎生成",
+        note: "由 GIS_P 离线 Valhalla 路线引擎生成",
         tags: ["offline-route", state.route.costing],
         color: "#2679a6",
         geometry: state.route.result.geometry
@@ -2425,7 +2425,7 @@ function useResourceAction(action) {
     showToast("离线中文与拉丁字形已启用");
   } else if (action === "styles") {
     elements.resourceManagerDialog.close();
-    document.body.classList.remove("panel-collapsed");
+    setSidePanelCollapsed(false);
     document.querySelector('[data-tab="layers"]')?.click();
     showToast("可在图层面板切换标准与探索风格");
     return;
@@ -2440,7 +2440,7 @@ function useResourceAction(action) {
     return;
   } else if (action === "personal") {
     elements.resourceManagerDialog.close();
-    document.body.classList.remove("panel-collapsed");
+    setSidePanelCollapsed(false);
     document.querySelector('[data-tab="personal"]')?.click();
     return;
   } else if (action === "tts") {
@@ -3519,15 +3519,21 @@ async function checkServices() {
   }
 }
 
+function setSidePanelCollapsed(collapsed, refreshCoverage = true) {
+  document.body.classList.toggle("panel-collapsed", collapsed);
+  elements.sidePanel.inert = collapsed;
+  elements.sidePanel.setAttribute("aria-hidden", String(collapsed));
+  elements.panelToggle.title = collapsed ? "展开侧栏" : "收起侧栏";
+  elements.panelToggle.setAttribute("aria-label", elements.panelToggle.title);
+  elements.panelToggle.setAttribute("aria-expanded", String(!collapsed));
+  elements.panelToggle.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}"></i>`;
+  icons();
+  if (refreshCoverage) window.setTimeout(() => updateCoveragePrompt(), 200);
+}
+
 function wireUi() {
   elements.panelToggle.addEventListener("click", () => {
-    document.body.classList.toggle("panel-collapsed");
-    const collapsed = document.body.classList.contains("panel-collapsed");
-    elements.panelToggle.title = collapsed ? "展开侧栏" : "收起侧栏";
-    elements.panelToggle.setAttribute("aria-label", elements.panelToggle.title);
-    elements.panelToggle.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}"></i>`;
-    icons();
-    window.setTimeout(() => updateCoveragePrompt(), 200);
+    setSidePanelCollapsed(!document.body.classList.contains("panel-collapsed"));
   });
 
   elements.onlineMapShortcut.addEventListener("click", () => setMapSourceOpen(elements.mapSourcePopover.hidden));
@@ -4085,6 +4091,7 @@ function wireMap() {
 
 async function init() {
   cacheElements();
+  setSidePanelCollapsed(document.body.classList.contains("panel-collapsed"), false);
   icons();
   const [catalog, resourceCatalog, worldCatalog, packStatus, packBoundaries] = await Promise.all([
     fetch("/config/map-catalog.json", { cache: "no-store" }).then((response) => response.json()),

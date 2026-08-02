@@ -41,7 +41,7 @@ The regional system can now be rebuilt from a checksum-verified local kit withou
 The fifth-priority capability set is implemented behind optional local services:
 
 1. Nominatim provides full address search and reverse geocoding from the same OSM source used by the installed maps.
-2. Valhalla provides driving, cycling, and walking routes through a stable GISS adapter; saved routes become ordinary personal tracks.
+2. Valhalla provides driving, cycling, and walking routes through a stable GIS_P adapter; saved routes become ordinary personal tracks.
 3. Fifty-eight local HGT grids provide point elevation, route profiles, and optional MapLibre terrain hillshade.
 4. A checksum-pinned Chinese Wikipedia all-mini ZIM is served locally by Kiwix.
 5. The lightweight PostGIS reference index now also drives bounded emergency layers for medical care, rescue, shelter, supplies, and fuel.

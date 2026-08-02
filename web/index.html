@@ -4,17 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f6f2" />
-    <title>GISS 个人离线地图</title>
+    <title>GIS_P 个人离线地图</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css" />
     <link rel="stylesheet" href="/src/app.css?v=20260802-1" />
   </head>
-  <body>
+  <body class="panel-collapsed">
     <div id="map" aria-label="个人离线地图"></div>
 
     <header class="topbar">
-      <button id="panelToggle" class="icon-button" type="button" title="收起侧栏" aria-label="收起侧栏">
-        <i data-lucide="panel-left-close"></i>
+      <button id="panelToggle" class="icon-button" type="button" title="展开侧栏" aria-label="展开侧栏" aria-expanded="false" aria-controls="sidePanel">
+        <i data-lucide="panel-left-open"></i>
       </button>
       <form id="searchForm" class="search" role="search">
         <i data-lucide="search"></i>
@@ -107,10 +107,10 @@
       </aside>
     </div>
 
-    <aside id="sidePanel" class="side-panel" aria-label="地图工具">
+    <aside id="sidePanel" class="side-panel" aria-label="地图工具" aria-hidden="true" inert>
       <div class="panel-heading">
         <div>
-          <h1>GISS</h1>
+          <h1>GIS_P</h1>
           <p>个人离线地图</p>
         </div>
         <span id="systemState" class="status-badge">连接中</span>
@@ -346,7 +346,7 @@
         <section class="resource-storage" aria-label="设备存储">
           <div class="resource-storage-heading"><span>设备存储</span><strong id="resourceDiskFree">检查中</strong></div>
           <div class="resource-storage-track"><span id="resourceDiskUsedBar"></span></div>
-          <div class="resource-storage-meta"><span id="resourceDiskUsed">--</span><span id="resourceManagedSize">GISS 可计量 --</span></div>
+          <div class="resource-storage-meta"><span id="resourceDiskUsed">--</span><span id="resourceManagedSize">GIS_P 可计量 --</span></div>
         </section>
         <div id="resourceManagerBody" class="resource-manager-body">
           <aside id="resourceRegionBrowser" class="resource-region-browser" aria-label="区域目录">
@@ -461,7 +461,7 @@
     <script src="/vendor/pmtiles/pmtiles.js"></script>
     <script src="/vendor/maplibre-contour/index.min.js"></script>
     <script src="/vendor/lucide/lucide.min.js"></script>
-    <script src="/src/map-style.js?v=20260801-1"></script>
-    <script type="module" src="/src/app.js?v=20260802-1"></script>
+    <script src="/src/map-style.js?v=20260802-2"></script>
+    <script type="module" src="/src/app.js?v=20260802-2"></script>
   </body>
 </html>
