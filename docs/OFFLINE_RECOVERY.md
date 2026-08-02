@@ -1,10 +1,10 @@
-# GISS Offline Recovery Guide
+# GIS_P Offline Recovery Guide
 
 This guide is designed to remain usable when internet access and image registries are unavailable. Print a copy and keep it with the offline disk.
 
 ## What the kit contains
 
-- the GISS application, scripts, documentation, browser libraries, glyphs, and sprites;
+- the GIS_P application, scripts, documentation, browser libraries, glyphs, and sprites;
 - the latest PostgreSQL and media backup;
 - every installed catalogued PMTiles archive and provenance manifest;
 - every installed pack's regional PBF, the China PBF/state, all member polygons, and cached Planetiler inputs;
@@ -25,7 +25,7 @@ The kit does not include Windows or the Docker Desktop installer. Archive a test
 
 ## Verify a kit
 
-From the original GISS project:
+From the original GIS_P project:
 
 ```powershell
 D:\GISS\verify-offline-kit.cmd -KitDirectory E:\GISS-OFFLINE\YYYYMMDD-HHMMSS

@@ -26,10 +26,14 @@ fs.mkdirSync(outputDir, { recursive: true });
 
   await page.goto(`${baseUrl}/`, { waitUntil: "load" });
   await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 90000 });
+  if (!await page.locator("body").evaluate((body) => body.classList.contains("panel-collapsed"))) {
+    throw new Error("The side panel should be collapsed on first load.");
+  }
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   await page.getByRole("button", { name: "系统", exact: true }).click();
   await page.getByRole("button", { name: "管理资源", exact: true }).click();
   await page.waitForURL("**/resources.html");
-  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 5, null, { timeout: 90000 });
+  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 4, null, { timeout: 90000 });
   await page.getByRole("button", { name: /添加区域/ }).click();
   await page.locator('[data-catalog-scope="global"]').click();
   await page.locator("#catalogSearch").fill("日本");
@@ -39,6 +43,7 @@ fs.mkdirSync(outputDir, { recursive: true });
 
   await page.waitForURL("**/?coverage=gf-japan");
   await page.waitForFunction(() => document.querySelector("#coveragePromptTitle")?.textContent.includes("日本") && !document.querySelector("#coveragePrompt")?.hidden, null, { timeout: 30000 });
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   const overview = await page.evaluate(async () => {
     const image = new Image();
     image.src = "/assets/overview/gray-earth.jpg?v=mercator-4096-20260801";

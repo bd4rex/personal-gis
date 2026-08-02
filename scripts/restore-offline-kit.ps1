@@ -83,5 +83,5 @@ if (-not $latestBackup) { throw "The restored payload contains no database backu
 & (Join-Path $target "scripts\restore-giss.ps1") -BackupDirectory $latestBackup.FullName
 & (Join-Path $target "scripts\health-check.ps1") | Out-Host
 
-Write-Host "Offline GISS recovery completed: $target"
+Write-Host "Offline GIS_P recovery completed: $target"
 Write-Host "Map: http://localhost:8080/"

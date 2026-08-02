@@ -88,7 +88,9 @@ Docker Desktop's WSL data root is `D:\DockerData\wsl`. The persisted Docker sett
 
 Verify the active location in `%LOCALAPPDATA%\Docker\log\host\com.docker.backend.exe.log` or by checking that `D:\DockerData\wsl\disk\docker_data.vhdx` advances. During a future migration, do not delete the previous VHD until containers, images, volumes, API counts, and a backup have all been checked from the destination copy.
 
-On 2026-08-02, the migrated D-drive store passed those checks and the inactive `C:\Users\Administrator\AppData\Local\Docker\wsl\disk\docker_data.vhdx` was removed. The D-drive VHD is the only retained Docker data disk; all seven GISS containers remained healthy and the web endpoint returned HTTP 200 after cleanup.
+On 2026-08-02, the migrated D-drive store passed those checks and the inactive `C:\Users\Administrator\AppData\Local\Docker\wsl\disk\docker_data.vhdx` was removed. The D-drive VHD is the only retained Docker data disk; all seven GIS_P containers remained healthy and the web endpoint returned HTTP 200 after cleanup.
+
+The user-facing product name is `GIS_P`. Existing paths, Docker resource names, environment variables, local-storage keys, scheduled-task names, and offline-kit payload paths keep their `GISS`/`giss` identifiers as a compatibility contract until a separately tested data migration is available.
 
 ## Style and local assets
 

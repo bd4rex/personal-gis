@@ -10,9 +10,9 @@ References:
 - https://github.com/osmandapp/OsmAnd/blob/master/LICENSE
 - https://www.osmand.net/docs/user/personal/maps-resources/
 
-GISS may study OsmAnd's information architecture, workflows, and operational lessons. It must not copy OsmAnd layouts, UI code, or protected visual assets. GISS uses its own desktop layout, Lucide icons, terminology, and implementation.
+GIS_P may study OsmAnd's information architecture, workflows, and operational lessons. It must not copy OsmAnd layouts, UI code, or protected visual assets. GIS_P uses its own desktop layout, Lucide icons, terminology, and implementation.
 
-## Patterns adopted in GISS
+## Patterns adopted in GIS_P
 
 - Separate Available, Local, and Updates responsibilities.
 - Organize downloadable maps by world, continent, country, and independent region.
@@ -40,11 +40,11 @@ Every visible resource family now declares a delivery type and, where applicable
 
 Map-package updates refresh the provider state and source snapshot before rebuilding. Province packages sharing the China snapshot first compare the remote replication sequence; one newly downloaded and validated snapshot is reused by following province jobs. After a successful build the manifest sequence matches the trusted state, so the update leaves the update list. The API rejects a repeated update when the installed manifest is already current; **Rebuild** remains available as a separate action.
 
-GISS deliberately does not duplicate OsmAnd's mobile navigation client, proprietary service entitlements, or worldwide contour/terrain distribution. Search and routing are shared derived indexes and must be rebuilt after coverage changes. Terrain is offered only where owned HGT files actually cover the package. The online OpenStreetMap Standard source is an opt-in current-viewport reference, not an offline tile-download service.
+GIS_P deliberately does not duplicate OsmAnd's mobile navigation client, proprietary service entitlements, or worldwide contour/terrain distribution. Search and routing are shared derived indexes and must be rebuilt after coverage changes. Terrain is offered only where owned HGT files actually cover the package. The online OpenStreetMap Standard source is an opt-in current-viewport reference, not an offline tile-download service.
 
 ## Patterns not copied directly
 
 - Mobile bottom sheets, long-press-only actions, and app-store purchase states do not fit this desktop-first local system.
-- OsmAnd's proprietary service entitlements and server download limits are not part of GISS.
+- OsmAnd's proprietary service entitlements and server download limits are not part of GIS_P.
 - UI assets and layouts covered by OsmAnd's separate CC BY-NC-ND terms are not reused.
-- GISS keeps desktop-specific operational evidence: source checksums, build logs, PostGIS readiness, container health, and offline recovery-kit verification.
+- GIS_P keeps desktop-specific operational evidence: source checksums, build logs, PostGIS readiness, container health, and offline recovery-kit verification.

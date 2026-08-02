@@ -100,7 +100,7 @@ MAINTENANCE_ROOT.mkdir(parents=True, exist_ok=True)
 (MAINTENANCE_ROOT / "jobs").mkdir(parents=True, exist_ok=True)
 
 pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=6, kwargs={"row_factory": dict_row})
-app = FastAPI(title="GISS Personal Data API", version="1.0.0", docs_url="/docs")
+app = FastAPI(title="GIS_P Personal Data API", version="1.0.0", docs_url="/docs")
 RESOURCE_INVENTORY_REFRESH_LOCK = Lock()
 
 
@@ -303,7 +303,7 @@ def upstream_json(
     request = Request(
         url,
         data=body,
-        headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "GISS/1.0"},
+        headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "GIS_P/1.0"},
         method="POST" if body is not None else "GET",
     )
     try:
@@ -314,7 +314,7 @@ def upstream_json(
 
 
 def upstream_available(base_url: str, path: str) -> bool:
-    request = Request(f"{base_url}{path}", headers={"User-Agent": "GISS/1.0"})
+    request = Request(f"{base_url}{path}", headers={"User-Agent": "GIS_P/1.0"})
     try:
         with urlopen(request, timeout=1.5) as response:
             return 200 <= response.status < 400
@@ -351,18 +351,22 @@ def shared_index_scope_state() -> dict[str, Any]:
         and bool(validation.get("active"))
         and bool(validation.get("lastBuildMapAvailable"))
     )
+    complete = bool(manifest) and enabled_ids.issubset(indexed_ids)
     return {
-        "current": bool(manifest) and indexed_ids == enabled_ids,
+        "complete": complete,
+        "current": complete and indexed_ids == enabled_ids,
         "verified": verified,
         "validation": validation,
         "enabledPackIds": sorted(enabled_ids),
         "indexedPackIds": sorted(indexed_ids),
+        "missingPackIds": sorted(enabled_ids - indexed_ids),
+        "extraPackIds": sorted(indexed_ids - enabled_ids),
     }
 
 
 def require_current_shared_index() -> None:
-    if not shared_index_scope_state()["current"]:
-        raise HTTPException(status_code=503, detail="启用地图包范围已变化，请先重建搜索与路线共享索引")
+    if not shared_index_scope_state()["complete"]:
+        raise HTTPException(status_code=503, detail="共享索引未覆盖全部启用地图包，请先重建搜索与路线共享索引")
 
 
 DEFAULT_MAINTENANCE_SETTINGS = {
@@ -807,8 +811,8 @@ def capabilities() -> dict[str, Any]:
     return {
         "source": manifest,
         "services": {
-            "geocoder": {"available": scope["current"] and upstream_available(NOMINATIM_URL, "/status"), "scopeCurrent": scope["current"], "verified": scope["verified"]},
-            "routing": {"available": scope["current"] and upstream_available(VALHALLA_URL, "/status"), "scopeCurrent": scope["current"], "verified": scope["verified"]},
+            "geocoder": {"available": scope["complete"] and upstream_available(NOMINATIM_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "extraPackIds": scope["extraPackIds"]},
+            "routing": {"available": scope["complete"] and upstream_available(VALHALLA_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "extraPackIds": scope["extraPackIds"]},
             "encyclopedia": {"available": upstream_available(KIWIX_URL, "/wiki/")},
             "elevation": {"available": elevation_files > 0, "files": elevation_files},
         },
@@ -2935,7 +2939,7 @@ def export_all_gpx() -> Response:
     features = tracks_geojson(q="")["features"]
     return Response(
         content=gpx_document(features), media_type="application/gpx+xml",
-        headers={"Content-Disposition": 'attachment; filename="giss-tracks.gpx"'},
+        headers={"Content-Disposition": 'attachment; filename="GIS_P-tracks.gpx"'},
     )
 
 
@@ -2953,7 +2957,7 @@ def export_geojson() -> dict[str, Any]:
 @app.get("/export/archive")
 def export_personal_archive() -> FileResponse:
     generated_at = datetime.now().astimezone()
-    archive_name = f"giss-personal-{generated_at.strftime('%Y%m%d-%H%M%S')}.zip"
+    archive_name = f"GIS_P-personal-{generated_at.strftime('%Y%m%d-%H%M%S')}.zip"
     target = EXPORT_ROOT / archive_name
     geojson_bytes = json.dumps(export_geojson(), ensure_ascii=False, indent=2, default=str).encode("utf-8")
     with pool.connection() as conn:
@@ -2996,7 +3000,8 @@ def export_personal_archive() -> FileResponse:
             "files": manifest_entries,
         }
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
-    for path in EXPORT_ROOT.glob("giss-personal-*.zip"):
-        if path != target and generated_at.timestamp() - path.stat().st_mtime > 7 * 86400:
-            path.unlink(missing_ok=True)
+    for pattern in ("GIS_P-personal-*.zip", "giss-personal-*.zip"):
+        for path in EXPORT_ROOT.glob(pattern):
+            if path != target and generated_at.timestamp() - path.stat().st_mtime > 7 * 86400:
+                path.unlink(missing_ok=True)
     return FileResponse(target, media_type="application/zip", filename=archive_name)

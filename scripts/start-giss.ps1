@@ -96,7 +96,7 @@ try {
   else {
     docker compose @profileArguments up -d --build | Out-Host
   }
-  if ($LASTEXITCODE -ne 0) { throw "One or more GISS services failed to start." }
+  if ($LASTEXITCODE -ne 0) { throw "One or more GIS_P services failed to start." }
 }
 finally {
   Pop-Location
@@ -124,7 +124,7 @@ if (-not $workerRunning) {
 }
 
 Write-Host ""
-Write-Host "GISS is starting."
+Write-Host "GIS_P is starting."
 Write-Host "Advanced offline engines: $(if ($advancedReady) { 'enabled' } else { 'not prepared' })"
 Write-Host "Maintenance worker: enabled"
 Write-Host "Map: http://localhost:8080/"
