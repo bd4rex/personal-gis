@@ -1,229 +1,82 @@
-# 个人 GIS 本地 MVP 规划
+# Local Personal GIS MVP Plan
 
-> 历史规划文档：记录最初的方案比较，不再作为当前部署说明。当前实现请看根目录 `README.md` 与 `docs/ARCHITECTURE.md`。
+> English | [简体中文](local-mvp-plan.zh-CN.md) · Historical document
 
-目标：先在本地跑通一套可演化的个人 GIS 标记系统。MVP 不追求一开始自研完整移动端，而是先验证核心闭环：
+This is an archived planning record. It explains the alternatives considered before the current system existed; it is not a deployment guide. See the [project README](../README.md) and [architecture](ARCHITECTURE.md) for the current implementation.
 
-```text
-本地桌面管理 -> 手机端查看/采集 -> 标记数据同步 -> Web 地图浏览 -> 数据长期归档
-```
+## Original objective
 
-## 核心原则
-
-- 底图和个人数据分离。底图可以来自在线服务、本地 MBTiles、OsmAnd 离线包或 OpenFreeMap；个人标记必须由自己保存。
-- MVP 优先使用开放格式：GeoPackage、GPX、GeoJSON、PostGIS。
-- 手机端先借用成熟 App，避免从零写移动端。
-- 本地第一阶段不要追求全球底图自托管，先用在线底图或小区域离线底图。
-- 系统要能从文件型 MVP 平滑升级到 PostGIS + Web API。
-
-## 系统路线对比
-
-| 路线 | 组成 | 优点 | 缺点 | 适合阶段 |
-|---|---|---|---|---|
-| OsmAnd + Syncthing + QGIS | 手机 OsmAnd，桌面 QGIS，同步 GPX/收藏/轨迹 | 最快开始，手机体验成熟，离线地图强 | 数据模型偏 OsmAnd，冲突合并和结构化属性弱 | 第 0 阶段验证习惯 |
-| QGIS + QField + GeoPackage | 桌面 QGIS，手机 QField，共享 `.gpkg` 项目 | 更像专业 GIS，表单/照片/点线面都自然 | 需要学习 QGIS/QField 项目配置 | 推荐 MVP |
-| QGIS + QFieldCloud 自托管 + PostGIS | QField/QGIS 同步，中心库 PostGIS | 可长期演化，支持在线/离线/多人/REST API | 部署稍重，初期复杂度高 | MVP 后半段或 v1 |
-| Mergin Maps CE + QGIS | Mergin Maps 手机端和自托管 CE | 外业采集与同步体验成熟，开源 CE | 生态绑定 Mergin 服务端模型 | 可替代 QFieldCloud |
-| 自写 Web + 自写移动端 + PostGIS | MapLibre Web，Flutter/React Native 移动端 | 完全可控，产品形态自由 | 最慢，移动离线/同步成本高 | v2 以后 |
-
-## 推荐 MVP 路线
-
-建议采用“双轨 MVP”：
+Validate an evolvable personal GIS loop before building a complete custom mobile application:
 
 ```text
-短期工作流：OsmAnd/QField + GeoPackage
-长期内核：PostGIS + Martin + MapLibre
+Desktop management -> mobile viewing/collection -> marker synchronization -> web map -> durable local archive
 ```
 
-第一阶段不要把所有东西都塞进 PostGIS。先用 `places.gpkg` 作为主数据文件，因为它能被 QGIS、QField 和很多 GIS 工具直接打开。等字段、分类、照片路径和同步方式稳定后，再升级到 PostGIS。
+## Principles evaluated
 
-## MVP 目标
+- Keep replaceable reference maps separate from irreplaceable personal records.
+- Prefer open formats: GeoPackage, GPX, GeoJSON, and PostGIS.
+- Reuse a mature mobile application before investing in a custom client.
+- Prove a small regional workflow before hosting global data.
+- Preserve a migration path from files to PostGIS and a local API.
 
-本地必须做到：
+## Alternatives
 
-- 在 QGIS 中打开个人标记图层。
-- 新增、编辑、分类个人兴趣点。
-- 保存备注、标签、评分、来源、照片路径。
-- 在 Web 地图中查看这些点。
-- 手机上能新增或导入点位。
-- 数据能回到本地项目目录。
+| Route | Strength | Limitation | Intended stage |
+| --- | --- | --- | --- |
+| OsmAnd + Syncthing + QGIS | Fast start and mature offline navigation | Weak structured merge/conflict model | Habit validation |
+| QGIS + QField + GeoPackage | Professional forms, photos, points, lines, and polygons | Requires QGIS/QField project setup | Recommended early MVP |
+| QGIS + self-hosted QFieldCloud + PostGIS | Long-term database and synchronization | Heavier initial deployment | Later MVP / v1 |
+| Mergin Maps CE + QGIS | Mature field workflow and open server edition | Tied to its server model | Alternative sync route |
+| Custom web/mobile + PostGIS | Complete product control | Highest offline and synchronization cost | v2 or later |
 
-暂不做：
-
-- 用户系统和权限。
-- 商业 POI 批量导入。
-- 全球瓦片自托管。
-- 从零开发移动 App。
-- 复杂路线规划和导航。
-
-## 本地目录建议
+## Original recommended path
 
 ```text
-个人GIS/
-  data/
-    places.gpkg
-    imports/
-      osmand/
-      gpx/
-      geojson/
-    photos/
-    basemaps/
-      mbtiles/
-      pmtiles/
-  docs/
-    local-mvp-plan.md
-  services/
-    docker-compose.yml
-    postgis/
-    martin/
-  web/
-    index.html
-    src/
-  qgis/
-    personal-gis.qgz
-  scripts/
-    import-gpx.ps1
-    export-geojson.ps1
+Short term: OsmAnd or QField + GeoPackage
+Long term: PostGIS + Martin + MapLibre
 ```
 
-## 数据模型 MVP
+The file-first plan proposed a `places` dataset with stable ID, name, category, WGS84 geometry, notes, tags, rating, source, photo path, timestamps, and synchronization state. Future tables would add visits, collections, tracks, attachments, and version history.
 
-主图层：`places`
+## Planned phases
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | text/uuid | 稳定 ID |
-| `name` | text | 名称 |
-| `category` | text | 分类，如 food、trail、shop、viewpoint、todo |
-| `geom` | point | WGS84 点位 |
-| `note` | text | 备注 |
-| `tags` | text/json | 标签 |
-| `rating` | integer | 个人评分 |
-| `source` | text | manual、osmand、qfield、gpx、import |
-| `photo_path` | text | 本地照片相对路径 |
-| `created_at` | datetime | 创建时间 |
-| `updated_at` | datetime | 更新时间 |
-| `sync_state` | text | local、synced、conflict |
+### Phase 0 — File proof
 
-后续可扩展：
+- Create `places.gpkg` or GeoJSON.
+- Import OsmAnd favorites/GPX into QGIS.
+- Confirm at least ten classified personal points and refine fields.
 
-- `visits`：访问记录。
-- `collections`：收藏夹/项目。
-- `tracks`：轨迹。
-- `attachments`：照片、录音、文档。
-- `place_versions`：版本历史。
+### Phase 1 — QField collection
 
-## 阶段计划
+- Build a QGIS/QField project with mobile forms.
+- Capture points, notes, and photos on the phone.
+- Verify that records and relative media paths return locally.
 
-### 阶段 0：文件型验证
+### Phase 2 — Local web view
 
-目标：1 天内跑通。
+- Render exported GeoJSON with MapLibre or Leaflet.
+- Display categories and detail popups.
+- Start with an online or small offline base map.
 
-- 创建 `data/places.gpkg`。
-- 用 QGIS 建一个点图层和简单样式。
-- 手机用 OsmAnd 导出 favorites/GPX，放入 `data/imports/osmand/`。
-- 在 QGIS 中导入 GPX，手工合并到 `places.gpkg`。
-- 记录哪些字段需要保留。
+### Phase 3 — PostGIS core
 
-验收：
+- Start PostgreSQL/PostGIS in Docker.
+- Import the stabilized personal schema.
+- Publish reviewed views through Martin or an API.
 
-- QGIS 能打开 `places.gpkg`。
-- 至少有 10 个个人标记点。
-- 点位有分类、备注、来源。
+### Phase 4 — Synchronization choice
 
-### 阶段 1：QField 手机采集
+- Compare QFieldCloud, Mergin Maps CE, Syncthing, and a small custom API.
+- Choose only after the data model and actual mobile workflow are stable.
 
-目标：手机端能新增点位。
+## What changed in the implemented system
 
-- 用 QGIS 创建 `qgis/personal-gis.qgz`。
-- 配置 QField 可用的表单字段。
-- 将项目同步到手机。
-- 手机新增点位、备注、照片。
-- 回传并在 QGIS 中确认。
+The current project advanced beyond this plan: PostGIS is already the personal source of truth; FastAPI owns writes; Martin publishes approved views; PMTiles and OSM Carto provide local maps; Nominatim, Valhalla, terrain, Kiwix, resource lifecycle management, backups, and disconnected recovery are operational. A dedicated mobile synchronization client remains future work.
 
-验收：
+## Historical references
 
-- 手机新增的点能回到本地。
-- 照片路径能在项目里追踪。
-- 字段结构没有明显别扭处。
-
-### 阶段 2：本地 Web 查看
-
-目标：浏览器中查看个人点。
-
-- 使用 MapLibre GL JS 或 Leaflet。
-- 先把 `places.gpkg` 导出为 GeoJSON。
-- Web 页面加载 GeoJSON 并显示分类图标。
-- 底图先用在线 OSM/OpenFreeMap/MapTiler，后续再换本地瓦片。
-
-验收：
-
-- 本地浏览器能打开地图。
-- 点位按分类显示。
-- 点击点位能看到名称、备注、照片链接。
-
-### 阶段 3：PostGIS 内核
-
-目标：把长期数据放进数据库。
-
-- 使用 Docker 启动 PostgreSQL + PostGIS。
-- 将 `places.gpkg` 导入 PostGIS。
-- 用 Martin 从 PostGIS 发布矢量瓦片或 GeoJSON API。
-- Web 端改为从本地服务读取数据。
-
-验收：
-
-- PostGIS 有 `places` 表。
-- Web 端不再依赖静态 GeoJSON。
-- 能通过 SQL 查询分类、范围、更新时间。
-
-### 阶段 4：同步服务选择
-
-目标：决定长期手机同步方案。
-
-候选：
-
-- QFieldCloud 自托管。
-- Mergin Maps CE 自托管。
-- Syncthing 文件同步。
-- 自写轻量 API。
-
-建议先比较 QFieldCloud 和 Mergin Maps CE。二者都比从零写移动同步靠谱；差异主要在部署、授权、生态和你更喜欢哪个移动端体验。
-
-## 当前推荐决策
-
-优先路线：
-
-```text
-QGIS + QField + GeoPackage -> PostGIS + Martin + MapLibre -> QFieldCloud 或 Mergin Maps CE
-```
-
-保留 OsmAnd：
-
-```text
-OsmAnd = 日常导航、离线地图、轨迹和收藏来源
-QField = 严肃采集和结构化编辑
-QGIS = 桌面整理和项目配置
-PostGIS = 长期数据库
-MapLibre = Web 查看和未来产品界面
-```
-
-## 第一个可执行任务
-
-下一步可以直接做：
-
-1. 建立 `data/`、`qgis/`、`web/`、`services/`、`scripts/` 目录。
-2. 生成一个空的 `places.geojson` 或 `places.gpkg` 种子数据。
-3. 做一个本地 Web 地图页面，先读取 GeoJSON。
-4. 后面再补 QGIS/QField 项目。
-
-如果机器暂时没有 GDAL/QGIS 命令行环境，第一步可用 GeoJSON 代替 GeoPackage。GeoJSON 足够验证 Web 和数据模型，GeoPackage 留给 QGIS/QField 阶段。
-
-## 参考资料
-
-- QFieldCloud self-hosting: https://docs.qfield.org/fi/reference/qfieldcloud/self_hosted/
-- Mergin Maps CE server: https://merginmaps.com/docs/server/
-- OsmAnd import/export: https://osmand.net/docs/user/personal/import-export/
-- OsmAnd favorites: https://osmand.net/docs/user/personal/favorites/
-- Martin tile server: https://martin.maplibre.org/
-- MapLibre Martin docs: https://maplibre.org/martin/
+- [QFieldCloud self-hosting](https://docs.qfield.org/fi/reference/qfieldcloud/self_hosted/)
+- [Mergin Maps server](https://merginmaps.com/docs/server/)
+- [OsmAnd import/export](https://osmand.net/docs/user/personal/import-export/)
+- [Martin](https://martin.maplibre.org/)

@@ -1,5 +1,7 @@
 # Process Log
 
+> English | [简体中文](PROCESS_LOG.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 > Historical implementation narrative. Commands and ports in earlier sections describe the system at that point in time. Use `README.md` and the current operations/rebuild documents for active instructions.
 
 This is the implementation log for the Jiangsu/Anhui GIS_P MVP.

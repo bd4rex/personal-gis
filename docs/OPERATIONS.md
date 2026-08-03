@@ -1,5 +1,7 @@
 # Operations
 
+> English | [简体中文](OPERATIONS.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 ## Start, stop, and inspect
 
 ```powershell
@@ -18,7 +20,7 @@ docker compose ps
 docker compose logs --tail 100 api web martin postgis
 ```
 
-Expected core containers are `giss-web`, `giss-api`, `giss-martin`, and `giss-postgis`. A prepared installation also runs healthy `giss-nominatim`, `giss-valhalla`, and `giss-kiwix` containers.
+Expected core containers are `giss-web`, `giss-api`, `giss-martin`, and `giss-postgis`. A prepared installation also runs healthy `giss-nominatim`, `giss-valhalla`, `giss-kiwix`, and `giss-osm-carto` containers.
 
 ## Advanced offline capabilities
 
@@ -46,6 +48,7 @@ The script verifies:
 - the map-pack API sees the synchronized global catalog and every installed archive;
 - the latest backup directory can be identified.
 - Nominatim, Valhalla, elevation grids, both Kiwix archives, global overview, weather, and nautical endpoints are ready.
+- the OSM Carto manifest, database service, and proxied raster tile endpoint are ready when that renderer is prepared.
 
 Resource lifecycle assertions use the last complete persistent inventory so a health check does not start a full disk scan while a large map is being built. On a first start with no inventory cache, the check performs one fresh inventory with an extended timeout.
 
@@ -272,7 +275,7 @@ Invoke-RestMethod http://localhost:8080/api/capabilities
 Invoke-RestMethod 'http://localhost:8080/api/geocode?q=南京大学'
 Invoke-RestMethod 'http://localhost:8080/api/elevation?longitude=118.7969&latitude=32.0603'
 curl.exe -I -H "Range: bytes=0-1023" http://localhost:8080/tiles/jiangsu.pmtiles
-curl.exe -I -H "Range: bytes=0-1023" http://localhost:8080/tiles/zhejiang.pmtiles
+curl.exe -I -H "Range: bytes=0-1023" http://localhost:8080/tiles/anhui.pmtiles
 ```
 
 The last command should return `206 Partial Content`.

@@ -1,5 +1,7 @@
 # GIS_P Offline Recovery Guide
 
+> English | [简体中文](OFFLINE_RECOVERY.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 This guide is designed to remain usable when internet access and image registries are unavailable. Print a copy and keep it with the offline disk.
 
 ## What the kit contains
@@ -8,7 +10,8 @@ This guide is designed to remain usable when internet access and image registrie
 - the latest PostgreSQL and media backup;
 - every installed catalogued PMTiles archive and provenance manifest;
 - every installed pack's regional PBF, the China PBF/state, all member polygons, and cached Planetiler inputs;
-- the shared capability PBF, Valhalla graph/elevation, verified Wikipedia ZIM, and a consistent Nominatim index snapshot;
+- the shared capability PBF, Valhalla graph/elevation, verified Wikipedia and Wikivoyage ZIMs, and a consistent Nominatim index snapshot;
+- the OSM Carto source provenance, rendered-tile cache, and a consistent OSM Carto database snapshot;
 - the Natural Earth world overview and global downloadable-region catalog;
 - pinned runtime, advanced-engine, map-build, Osmium, and browser-test Docker images;
 - a SHA256 manifest covering every payload and image-archive file.
@@ -54,7 +57,7 @@ The restore process:
 1. verifies every kit file;
 2. copies the payload to the empty target directory;
 3. loads Docker images without contacting a registry;
-4. restores the packaged Nominatim volume before Compose starts;
+4. restores the packaged Nominatim and OSM Carto volumes before Compose starts;
 5. generates new local database and Nominatim passwords;
 6. starts services without rebuilding images or advanced indexes;
 7. restores the newest personal database and media backup;
@@ -66,7 +69,7 @@ Open `http://localhost:8080/` only after the health check succeeds.
 
 1. Browse Jiangsu/Anhui at overview and street zoom.
 2. Zoom out to the local world overview, locate an uninstalled region, and confirm its offline package prompt appears without enabling the online map.
-3. Open System, verify both installed packs, switch to Shanghai/Zhejiang, then switch back.
+3. Open System, verify the installed Jiangsu and Anhui packs, then inspect an uninstalled catalog region without starting a download.
 4. Search for `南京` and open an OSM reference result.
 5. Open a personal point and inspect its collections and photos.
 6. Export personal GeoJSON from the System tab.
@@ -96,10 +99,9 @@ The kit includes the China PBF, province polygons, regional PBF, cached Planetil
 ```powershell
 D:\GISS-RESTORED\region-pack.cmd Build -PackId jiangsu
 D:\GISS-RESTORED\region-pack.cmd Build -PackId anhui
-D:\GISS-RESTORED\region-pack.cmd Build -PackId shanghai
-D:\GISS-RESTORED\region-pack.cmd Build -PackId zhejiang
 D:\GISS-RESTORED\build-capability-source.cmd
 D:\GISS-RESTORED\import-reference-search.cmd
+D:\GISS-RESTORED\scripts\build-osm-carto.ps1
 D:\GISS-RESTORED\health-check.cmd
 ```
 

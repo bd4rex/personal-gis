@@ -1,5 +1,7 @@
 # Sources and Licenses
 
+> English | [简体中文](SOURCES_AND_LICENSES.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 This project combines open data and open-source software. Keep attribution visible and review upstream licenses before redistributing a data pack or bundled browser assets.
 
 ## OpenStreetMap data
@@ -63,7 +65,17 @@ Role: reads the locally served Terrarium DEM, smooths neighboring elevation tile
 
 Project: `https://github.com/hyperknot/openfreemap-styles`
 
-Role: the local sprite sheet is used for POI symbols; the downloaded Liberty JSON is retained as a style reference. The runtime does not call the OpenFreeMap tile service.
+Role: the local sprite sheet is used for POI symbols and the downloaded Liberty JSON is retained as a style reference. When the user explicitly selects OpenFreeMap, the browser may request its public vector tiles for the current viewport; those requests are temporary online references and are never treated as installed packages or bulk-cached offline data. Review the service's current attribution and usage terms before redistribution or non-personal deployment.
+
+## OpenStreetMap Carto, osm2pgsql, Mapnik, and mod_tile
+
+- Cartography: `https://github.com/gravitystorm/openstreetmap-carto`
+- Tile-server image: `https://github.com/Overv/openstreetmap-tile-server`
+- osm2pgsql: `https://github.com/openstreetmap/osm2pgsql`
+- Mapnik: `https://github.com/mapnik/mapnik`
+- mod_tile: `https://github.com/openstreetmap/mod_tile`
+
+Role: imports the current Jiangsu/Anhui OSM source into a dedicated database and renders the familiar local raster map. The runtime image is pinned by digest in `services/docker-compose.yml`. External-data provenance is recorded under `config/osm-carto` and `products/osm-carto`; OSM attribution and the applicable software/data licenses remain required when redistributing output.
 
 ## Nominatim
 

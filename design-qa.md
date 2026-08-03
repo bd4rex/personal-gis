@@ -1,5 +1,7 @@
 # Resource maintenance layout QA
 
+> English | [简体中文](design-qa.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 - Reference: `C:\Users\Administrator\Desktop\屏幕截图 2026-07-22 193947.png`
 - Capture: `D:\GISS\runtime\ui-smoke\resource-manager.png`
 - Viewport: 1440 x 900 desktop

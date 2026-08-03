@@ -1,92 +1,96 @@
-# 资源与地图版本管理
+# Resource and Map Version Management
 
-## 入口
+> English | [简体中文](RESOURCE_AND_VERSION_MANAGEMENT.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
 
-- 地图浏览：`http://localhost:8080/`
-- 资源与版本：`http://localhost:8080/resources.html`
+## Entry points
 
-地图页面负责浏览、搜索、点位、轨迹和路线。资源页面负责添加区域、地图版本、磁盘占用、任务队列与更新检查。
+- Map: `http://localhost:8080/`
+- Resources and versions: `http://localhost:8080/resources.html`
 
-## 地图包状态
+The map handles browsing, search, personal places, tracks, and routes. The resource console handles acquisition, installed products, version history, disk accounting, maintenance jobs, and update checks.
 
-每个区域以 `resourceId` 独立管理。一个已安装地图包至少包含：
+## Map-package state
+
+Every region is managed by a stable `resourceId`. A complete installed package contains at least:
 
 - `products/tiles/pmtiles/<id>.pmtiles`
 - `products/tiles/pmtiles/<id>.manifest.json`
 
-清单记录源文件、源序列号、源时间、构建时间、文件大小和 SHA-256。API 只有在地图文件与清单同时存在时才把地图包视为已安装。
+The manifest records source path, source sequence and timestamp, build time, product bytes, SHA256, boundaries, tool provenance, and optional rich-detail overlay metadata. The API considers a map installed only when the product and manifest form a valid pair.
 
-版本页面同时展示：
+Version views distinguish:
 
-- 当前版本：正在参与渲染的 PMTiles 和清单；
-- 上游版本：最近一次上游检查得到的复制序列号；
-- 回退版本：与当前版本不同的最近一份完整 PMTiles 和清单；
-- 历史清单：只保存来源、时间和哈希，不重复保存大地图文件。
+- **current:** the enabled PMTiles and manifest;
+- **upstream:** the last trusted replication state;
+- **rollback:** the most recent complete product/manifest pair distinct from current;
+- **history:** small provenance records without duplicate large map files;
+- **staging:** incomplete build products that never count as installed.
 
-## 更新不变量
+## Update invariants
 
-中国省级地图共用一份已校验的中国 OSM 快照。更新不同省份时，只有远端序列号变化才下载新快照；其余省份复用同一份本地快照，不重复下载 1.59 GB。
+Mainland province maps share one verified China OSM snapshot. A new snapshot is downloaded only when the trusted upstream sequence changes; queued province updates at the same sequence reuse the validated local file.
 
-更新顺序：
+The activation order is:
 
-1. 下载到识别为 PBF 的暂存文件；
-2. 用 Osmium 完整扫描并核对 PBF 头部复制序列；
-3. 原子替换共享源，上一份源保留为灾备回退；
-4. 提取单省数据并生成暂存 PMTiles；
-5. 校验 PMTiles 头、大小和哈希；
-6. 原子替换当前地图与清单；
-7. 任务包装器写入明确的成功或失败结果。
+1. download to a PBF staging path;
+2. scan the full file with Osmium and compare the replication sequence;
+3. atomically activate the shared source and retain the previous source;
+4. extract one region and generate staged base/detail PMTiles products;
+5. verify headers, metadata, byte counts, and hashes;
+6. atomically activate the current map and manifest;
+7. persist an explicit success or failure result.
 
-已是最新版本时，更新 API 返回 `409`。重新生成必须使用“重建”，避免把重复构建伪装成新版本更新。
+An already-current update returns `409`. Regeneration from an unchanged source uses **Rebuild**, so a repeated build is not presented as a new upstream version.
 
-## 任务与地图联动
+## Task and map coordination
 
-资源页每 4 秒读取维护服务的真实任务状态，显示队列位置、阶段、百分比和处理速率。取消按钮只出现在对应任务行。
+The resource page polls the lightweight maintenance snapshot rather than starting a disk scan. Each row owns its queue position or elapsed time, stage, measured throughput, cancellation action, and retry state. Unknown progress remains labelled as processing instead of displaying a fabricated percentage.
 
-搜索与路线共享索引采用蓝绿版本：当前版本持续服务，维护任务在独立目录和 Docker 卷中生成候选版本，并限制为 4 个 CPU、6 GB 内存。候选版本必须通过服务状态、Nominatim 数据库检查以及南京和柏林覆盖抽查，才会更新活动指针。最终切换只重建服务容器；失败或取消不会删除当前版本，上一版本保留用于回退。重建阶段在任务行明确显示“当前地图继续可用”。
+Map changes notify other open tabs through the local `giss-resource-revision` value. Tabs refresh package state without forcibly reloading a PMTiles source while the user is editing a place or route.
 
-共享索引属于长任务，失败后不自动重试，避免在无人确认时再次占用十几个小时。维护服务或 Docker 意外中断时，任务会标为失败而不是从头重跑；候选容器会按任务标签清理，当前地图不受影响。
+Shared Nominatim and Valhalla indexes use a blue-green lifecycle. Candidate versions are resource-limited and built sequentially. Validation points are derived from the enabled coverage instead of hard-coded countries. Candidates must pass route health, Nominatim database integrity, search/reverse checks, and API readiness before activity pointers are changed. A failed or cancelled job leaves the active version intact; one previous version is retained by default.
 
-任务完成后，资源页写入 `giss-resource-revision` 通知其他已打开的地图标签页。地图页重新读取地图包状态并刷新区域列表。为避免打断点位或路线编辑，正在显示的 PMTiles 不会被强制重载；用户切换到变化区域时会载入新版本。
+Heavy shared-index jobs are never automatically retried after failure or worker restart.
 
-## 回退和删除
+## Enable, rollback, and remove
 
-“回退”通过维护队列原子交换当前版与上一版，原当前版成为新的回退版，因此可以再次切回。
+- **Disable** retains the map and source but removes the package from rendering and target shared-index scope.
+- **Enable** adds a verified package back to rendering and may mark shared indexes stale.
+- **Rollback** atomically swaps current and previous complete products, making the former current version the new rollback target.
+- **Protected remove** requires the resource ID as a confirmation token, deletes current/rollback derived maps, and retains regional PBF and boundary inputs for offline rebuilding.
 
-“受保护删除”要求资源 ID 作为确认令牌。删除当前和回退地图产物，但保留区域 PBF 与边界文件，以便离线重建。
+## Storage classification
 
-## 磁盘分类
+Inventory separates current maps, rollback maps, staging output, version manifests, shared OSM input, source rollback, routing/search indexes, OSM Carto, knowledge archives, backups, complete recovery kits, and renewable caches.
 
-资源盘点分别统计当前地图、回退地图、正在生成的地图、版本清单、共享 OSM 源、源回退、旧版省级对照源、可再生缓存和完整恢复包。暂存文件不会计入已安装地图，旧版对照源也不会重复计入共享源。
+Each local resource has four stable fields:
 
-分类模型参考 OsmAnd 的“下载 / 本地 / 可更新”视图和标准地图、地形、百科、旅行指南、天气、航海、语音、缓存等资源类型，但不照搬移动端文件格式。每个本地资源由四个稳定字段描述：
+- `resourceType`: what it is, such as `standard-map`, `osm-source`, or `routing-index`;
+- `storageClass`: its role, such as `primary`, `rollback`, `staging`, or `cache`;
+- `scope`: `regional`, `global`, `system`, or `personal`;
+- `validationPolicy`: the conditions required before it is considered valid.
 
-- `resourceType`：资源是什么，例如 `standard-map`、`osm-source`、`routing-index`；
-- `storageClass`：文件承担什么角色，例如 `primary`、`rollback`、`staging`、`cache`；
-- `scope`：资源覆盖的范围，例如 `regional`、`global`、`system`、`personal`；
-- `validationPolicy`：什么条件下可以称为有效资源。
+These definitions live in `RESOURCE_CLASSIFICATIONS` in `services/api/app/main.py`; UI label changes do not alter storage or validation semantics.
 
-这些字段集中定义在 `services/api/app/main.py` 的 `RESOURCE_CLASSIFICATIONS`，界面名称变化不会影响磁盘归类和验证规则。
+## Validity rules
 
-## 有效性规则
+File presence alone is insufficient:
 
-“文件存在”不等于“资源有效”。资源页使用以下状态：
+- **Ready:** manifests, bytes, required hashes, and runtime services satisfy the policy.
+- **Needs attention:** files exist, but dependencies are stale, a service is unavailable, or verification is incomplete.
+- **External volume/system capability:** data lives in Docker or browser runtime and is not counted as an owned host-path file.
+- **Not installed:** minimum completeness is absent.
+- **Cache:** safe to remove and regenerate; not part of the disaster-recovery baseline.
 
-- **就绪**：清单、实际字节、必要的小文件哈希和运行服务均满足当前验证策略；
-- **需检查**：资源仍在磁盘上，但版本依赖过期、服务不可用、清单不完整或尚未全量验证；
-- **外部卷 / 系统能力**：数据由 Docker 卷或浏览器运行时持有，不冒充本项目目录中的离线文件；
-- **未安装**：没有满足最小完整性条件的资源；
-- **缓存**：可删除并自动再生，不属于灾备基线。
+Specific rules include:
 
-具体策略：
+- current and rollback maps require matching product/manifest pairs and byte counts; full SHA256 is asynchronous;
+- OSM sources activate only after full Osmium structure and replication-state validation;
+- HGT files require valid names and grid byte sizes;
+- overview, weather, and nautical products require synchronized manifests, bytes, and hashes;
+- Wikipedia and Wikivoyage are accounted separately and also require a healthy Kiwix service;
+- Nominatim and Valhalla must be online and cover every enabled package; harmless extra coverage is usable but marked for cleanup;
+- an offline kit is verified only after every manifest entry passes SHA256 and `verification.json` is bound to the current manifest hash;
+- OSM Carto readiness requires provenance, a healthy database service, and a working local tile endpoint.
 
-- 当前地图：清单与文件必须成对，字节数必须一致；“校验完整性”异步执行全文件 SHA-256；
-- 地图回退：回退文件与回退清单必须成对，且字节数一致；
-- OSM 源：只在 Osmium 完整结构扫描、复制序列和状态文件一致后原子启用；
-- HGT 地形：文件名和标准网格字节数必须有效；
-- 概览、天气、航海：清单、字节数和 SHA-256 同步检查；
-- 百科与旅行指南：各自独立计量，清单与 ZIM 字节数一致，同时检查 Kiwix 服务；
-- 地址搜索与路线：索引服务在线且共享输入版本与已启用地图集合一致；地图更新后未重建索引时显示“需检查”；
-- 完整恢复包：只有逐文件 SHA-256 全量通过并生成 `verification.json`，且该凭据绑定当前 `manifest.json` 哈希时，才显示“已验证”。
-
-恢复包中的 `verification.json` 不纳入自身清单，避免递归哈希。重新运行验证时会先移除旧凭据；任何中途失败都会让资源恢复为“未验证”。
+`verification.json` is intentionally outside its own manifest. Reverification removes the old credential first, so any interrupted verification returns the kit to an unverified state.
