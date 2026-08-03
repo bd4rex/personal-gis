@@ -1,5 +1,7 @@
 # Configuration
 
+> English | [简体中文](CONFIGURATION.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 ## Host ports
 
 | Address | Use |
@@ -37,6 +39,7 @@ The Compose project lives in `services/docker-compose.yml`.
 | `nominatim` (`advanced`) | Docker volume `giss_nominatim_data` | none |
 | `valhalla` (`advanced`) | `products/routing/valhalla` | none |
 | `kiwix` (`advanced`) | read-only `products/encyclopedia` | none |
+| `osm-carto` (`advanced`) | external Docker volume `giss_osm_carto_data`; `data/osm-carto-tiles` | none |
 
 All third-party runtime images are pinned by digest. The API image is built from `services/api/Dockerfile` with exact Python dependency versions.
 
@@ -52,6 +55,7 @@ All third-party runtime images are pinned by digest. The API image is built from
 | `/api/` | FastAPI |
 | `/martin/` | Martin |
 | `/wiki/` | Kiwix, configured with the same URL prefix |
+| `/carto/` | local OSM Carto raster tiles |
 | `/web/` | compatibility redirect to `/` |
 | `/healthz` | nginx liveness |
 
@@ -88,7 +92,7 @@ Docker Desktop's WSL data root is `D:\DockerData\wsl`. The persisted Docker sett
 
 Verify the active location in `%LOCALAPPDATA%\Docker\log\host\com.docker.backend.exe.log` or by checking that `D:\DockerData\wsl\disk\docker_data.vhdx` advances. During a future migration, do not delete the previous VHD until containers, images, volumes, API counts, and a backup have all been checked from the destination copy.
 
-On 2026-08-02, the migrated D-drive store passed those checks and the inactive `C:\Users\Administrator\AppData\Local\Docker\wsl\disk\docker_data.vhdx` was removed. The D-drive VHD is the only retained Docker data disk; all seven GIS_P containers remained healthy and the web endpoint returned HTTP 200 after cleanup.
+On 2026-08-02, the migrated D-drive store passed those checks and the inactive `C:\Users\Administrator\AppData\Local\Docker\wsl\disk\docker_data.vhdx` was removed. On 2026-08-03, obsolete volumes, images, and renewable build cache were pruned after a recovery kit passed; filesystem trim and offline compaction reduced the active VHDX from 140.81 GiB to 24.51 GiB. The D-drive VHD is the only retained Docker data disk, and all eight GIS_P containers passed health and functional smoke checks after compaction.
 
 The user-facing product name is `GIS_P`. Existing paths, Docker resource names, environment variables, local-storage keys, scheduled-task names, and offline-kit payload paths keep their `GISS`/`giss` identifiers as a compatibility contract until a separately tested data migration is available.
 
@@ -98,6 +102,8 @@ The user-facing product name is `GIS_P`. Existing paths, Docker resource names, 
 - `web/assets/glyphs/`: local Noto Sans glyph PBF files;
 - `web/assets/sprites/ofm_f384/`: local sprite PNG/JSON;
 - `web/vendor/`: pinned MapLibre, PMTiles, and Lucide browser libraries.
+- `config/osm-carto/`: local OSM Carto external-data configuration;
+- `config/planetiler/`: project-owned rich-detail overlay configuration.
 
 `scripts/download-web-assets.ps1` downloads into staging paths, verifies basic size, then moves assets into place. It writes a local manifest with source URLs and versions.
 

@@ -1,78 +1,69 @@
-# GitHub Upload Notes
+# GitHub Publication Notes
 
-## Current Local State
+> English | [简体中文](GITHUB_UPLOAD.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
 
-At the time this document was created:
+## Current repository
 
-- `D:\GISS` was not yet a Git repository.
-- No GitHub remote was configured.
-- `gh` GitHub CLI was not installed on the Windows PATH.
-- Codex had a GitHub connector capable of writing text files to an existing repository if given `owner/name`.
+- Repository: [bd4rex/personal-gis](https://github.com/bd4rex/personal-gis)
+- Visibility: public
+- Default branch: `main`
+- Local remote: `origin`
+- First Git publication: `2026-08-01T18:44:56+08:00`
 
-## Recommended GitHub Strategy
+Large map products and private data are deliberately not stored in GitHub. The repository contains the reproducible system, documentation, catalogs, configuration, scripts, migrations, tests, and small seed/reference assets.
 
-Do commit:
+## Documentation conventions
 
-- `README.md`
-- `.gitignore`
-- `docs/`
-- `scripts/`
-- `services/`
-- `web/index.html`
-- `web/src/`
-- `web/config/`
-- `tests/`
-- `services/tools/` build/test Dockerfiles
-- root `*.cmd` launchers
+- The language switch at the top of every document is inspired by the direct English/Chinese navigation used in the [Ant Design repository](https://github.com/ant-design/ant-design).
+- The changelog uses a version-first, dated, human-readable structure inspired by the [Vue core changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md).
+- Timestamps use ISO 8601 with an explicit offset. Historical labels always link to the authoritative commit and never imply an absent tag or Release.
+
+## Commit scope
+
+Commit:
+
+- root README, changelog, `.gitignore`, and command launchers;
+- `docs/` and other maintained Markdown;
+- `config/`, `scripts/`, `services/`, and `tests/`;
+- `web/index.html`, `web/resources.html`, `web/src/`, and `web/config/`;
+- Dockerfiles, Compose configuration, and PostGIS migrations;
+- small generated catalog or overview metadata only when it is intentionally refreshed and reviewed.
 
 Do not commit:
 
-- `raw/`
-- `products/`
-- `tmp/`
-- `runtime/`
-- `web/assets/glyphs/`
-- `web/assets/sprites/`
-- `web/vendor/`
-- Docker volumes
-- `services/.env`
-- `data/media/`, `data/exports/`, and backups
+- `services/.env` or credentials;
+- `raw/`, `products/`, `tmp/`, `runtime/`, `backups/`, and `offline-kit/` payloads;
+- Docker volumes or VHDX files;
+- `data/media/`, exports, or personal database dumps;
+- downloaded glyph, sprite, vendor, and large map artifacts covered by `.gitignore`.
 
-These ignored files are reproducible from scripts.
+## Publication workflow
 
-## Local Git Init
+Use a focused branch and explicit staging when the worktree also contains generated runtime changes:
 
 ```powershell
-cd D:\GISS
-git init
-git add README.md .gitignore docs scripts services tests web/index.html web/src web/config *.cmd
-git commit -m "Build local-first Jiangsu Anhui GIS MVP"
+Set-Location D:\GISS
+git status -sb
+git switch -c agent/<description>
+git add README.md README.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md docs
+git diff --cached --check
+git commit -m "<description>"
+git push -u origin agent/<description>
+gh pr create --draft --fill
 ```
 
-If Git is not on PATH, use the Git bundled with Codex or install Git for Windows.
+Before merging:
 
-## Push to a New GitHub Repository
+1. verify English/Chinese links and Markdown anchors;
+2. run documentation validation and relevant project tests;
+3. inspect `git diff --cached` so generated manifests or private data are not included;
+4. confirm the PR base is `main` and checks pass;
+5. merge through GitHub and delete the branch when no longer needed.
 
-Create a GitHub repository first, for example:
+## Version history
 
-```text
-<owner>/giss-offline-map-mvp
-```
+Use [CHANGELOG.md](../CHANGELOG.md) and its Chinese counterpart for user-visible milestones. Every entry records an ISO 8601 timestamp and the authoritative commit hash. Do not claim a tag or GitHub Release existed unless it is visible in the repository.
 
-Then:
+## GitHub About
 
-```powershell
-git remote add origin https://github.com/<owner>/giss-offline-map-mvp.git
-git branch -M main
-git push -u origin main
-```
-
-## Upload Through Codex GitHub Connector
-
-If using the connector instead of local `git push`, provide the target repository in this form:
-
-```text
-owner/repo
-```
-
-Then the text files can be uploaded through GitHub's contents API. Binary/generated assets should still be rebuilt by scripts instead of uploaded one by one.
+The repository About description is maintained in English because it is the public discovery surface. README language links provide the localized project entry points.

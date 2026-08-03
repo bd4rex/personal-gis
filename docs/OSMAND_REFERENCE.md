@@ -1,5 +1,7 @@
 # OsmAnd resource-management reference
 
+> English | [简体中文](OSMAND_REFERENCE.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 ## License boundary
 
 OsmAnd is open source and its primary repositories are covered by GPLv3. Its repository license separately states that UI design and UX work, including layouts and icons, are covered by CC BY-NC-ND 4.0 and that publishing applications using OsmAnd UI/UX code in major app stores requires written permission.

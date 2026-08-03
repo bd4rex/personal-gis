@@ -1,13 +1,15 @@
 # Rebuild From Scratch
 
+> English | [简体中文](REBUILD.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 This procedure reconstructs the Jiangsu/Anhui MVP from repository files and upstream open data.
 
 ## Prerequisites
 
 - Windows 10/11 with PowerShell 5.1 or newer;
 - Docker Desktop with Linux containers;
-- at least 8GB available memory for the build;
-- at least 40GB free disk for current regional data, advanced indexes, build scratch, images, and rollback copies;
+- at least 8GB available memory for a build and 16GB total host memory; 32GB is recommended;
+- at least 80GB free disk for the current two-region system; keep 150GB free when rebuilding shared indexes and creating a new recovery kit in the same maintenance window;
 - internet access during the download phase.
 
 The normal runtime works offline after images, browser assets, and data are present.
@@ -64,7 +66,7 @@ The authoritative build input is:
 D:\GISS\raw\osm\china\china-latest.osm.pbf
 ```
 
-The script also downloads comparison extracts and replication metadata. The 34 province-level boundaries live under `raw/osm/polygons`; mainland units share the China snapshot, while Taiwan has an independent Geofabrik source profile.
+The legacy download entry maintains the shared China snapshot and replication metadata only; it does not recreate duplicate province source trees. The 34 province-level boundaries live under `raw/osm/polygons`; mainland units share the China snapshot, while Taiwan has an independent Geofabrik source profile.
 
 ## 5. Build province maps
 
@@ -97,7 +99,15 @@ This derives the named-place search index from `giss-core-latest.osm.pbf` and re
 D:\GISS\prepare-advanced.cmd
 ```
 
-This creates the shared capability PBF, downloads the configured Chinese Wikipedia ZIM, builds Valhalla graph/elevation products, and imports Nominatim. On a 16 GiB Windows host, finish Valhalla before Nominatim indexing so Docker's memory limit is not shared by both heavy builds.
+This creates the shared capability PBF, downloads the configured Chinese Wikipedia and Wikivoyage ZIMs, prepares the overview, weather, and nautical products, builds Valhalla graph/elevation products, and imports Nominatim. On a 16 GiB Windows host, finish Valhalla before Nominatim indexing so Docker's memory limit is not shared by both heavy builds.
+
+Build the familiar local OSM Carto renderer as a separate resumable operation:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\build-osm-carto.ps1
+```
+
+Its database and tile cache are validated independently and are included in complete recovery kits.
 
 ## 8. Verify
 
@@ -126,7 +136,7 @@ Copy these items to a second physical disk for disaster recovery:
 - `backups/`;
 - every installed `products/tiles/pmtiles/*.pmtiles` and matching manifest;
 - `raw/osm/china/china-latest.osm.pbf` and province polygons;
-- `raw/osm/china/giss-core-latest.osm.pbf`, `products/routing/valhalla`, and `products/encyclopedia`;
+- `raw/osm/china/giss-core-latest.osm.pbf`, `products/routing/valhalla`, `products/encyclopedia`, and `products/osm-carto`;
 - Docker image archives if rebuilding must work without an image registry.
 
 ## Fully disconnected rebuild preparation

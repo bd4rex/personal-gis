@@ -1,50 +1,46 @@
-# GIS_P 江苏 / 安徽本地地图 MVP
+# GIS_P Jiangsu / Anhui Local Map MVP
 
-## 当前目标
+> English | [简体中文](mvp-d-giss.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
 
-这套 MVP 不是单纯的地图演示，而是一套个人可控、断网后仍可使用的地理信息系统：
+## Objective
 
-- 本地 OSM 参考底图，可独立更新和回滚；
-- 自己的点位、轨迹、照片、分类、标签和备注；
-- GPX 导入、GeoJSON 导出；
-- PostGIS 空间索引、版本号和变更记录；
-- 数据库与照片备份、校验和恢复；
-- 完整离线地址、反向查询、路线、高程、地形、应急参考和中文百科。
+This MVP is a user-owned offline geographic system rather than a map demo:
 
-## 使用入口
+- locally rendered and independently versioned OSM reference maps;
+- personal places, tracks, photos, collections, tags, ratings, and notes;
+- GPX import/export and portable GeoJSON/ZIP exports;
+- PostGIS spatial indexes, optimistic versions, and change history;
+- checksum-protected backup, restore, and disconnected recovery;
+- local address search, reverse geocoding, routing, elevation, terrain, emergency references, and Chinese knowledge.
 
-浏览器只需要访问：
+## Entry point
 
 ```text
 http://localhost:8080/
 ```
 
-`/api/health`、`/martin/catalog` 等地址返回 JSON 是正常现象，它们是机器接口，不是地图页面。
+JSON at `/api/health` or `/martin/catalog` is expected; those are machine APIs.
 
-## 三层数据
+## Data layers
 
-| 层 | 当前实现 | 是否可替换 |
+| Layer | Current implementation | Ownership |
 | --- | --- | --- |
-| 参考底图 | OSM -> Osmium -> osm2pgsql/PostGIS -> OpenStreetMap Carto/Mapnik | 接近 OSM 官网表现，可重建，不影响个人数据 |
-| 交互备选底图 | OSM -> Planetiler -> 省级 PMTiles | 轻量、可移植，可点击地物属性 |
-| 个人数据 | FastAPI -> PostGIS，照片按 SHA256 存储 | 长期保留，是系统核心资产 |
-| 浏览界面 | MapLibre + 本地样式、字体、图标 | 可持续改进或更换客户端 |
-| 高级参考 | Nominatim + Valhalla + HGT + Kiwix | 均位于稳定本地接口之后 |
+| Familiar reference map | OSM → osm2pgsql/PostGIS → OSM Carto/Mapnik | Derived and rebuildable |
+| Interactive vector map | OSM → Planetiler → independent Jiangsu/Anhui PMTiles | Derived, portable, clickable |
+| Personal data | FastAPI → PostGIS; SHA256 media | Durable source of truth |
+| Browser | MapLibre, local styles, fonts, and sprites | Replaceable client |
+| Advanced reference | Nominatim, Valhalla, HGT, Kiwix | Replaceable behind local APIs |
 
-## 当前能力
+## Current scope
 
-- 苏皖、沪浙两个可校验矢量区域包，实际生成到 `z16`，MapLibre 可继续放大到 `z18`；
-- 默认使用 OSM 原版离线表现；合并后的交互矢量备选保留兴趣点属性与地物收藏交互；
-- 地形、水系、用地、道路、铁路、建筑、行政边界、地名、道路名、POI 与图例；
-- 添加、编辑、删除个人点位；
-- 导入 GPX、查看和删除轨迹；
-- 上传并关联照片；
-- 个人数据搜索、统计、导出；
-- 健康检查、API 冒烟测试和真实浏览器截图测试。
-- 完整地址搜索、地图点反查地址、驾车/骑行/步行路线和轨迹保存；
-- 路线高程剖面、地形阴影、应急设施分类和本地中文百科。
+- Jiangsu and Anhui independently verified PMTiles through z16, rendered together.
+- Local OSM Carto as the default familiar map and PMTiles as the interactive vector alternative.
+- Roads, buildings, water, land use, boundaries, labels, POIs, terrain, weather, nautical, and emergency layers.
+- Personal point/track/media lifecycle, collections, search, statistics, backup, and exports.
+- Full address search, reverse lookup, driving/cycling/walking routes, route elevation, contours, and local knowledge.
+- Health, API lifecycle, resource-console, main UI, and world-map browser tests.
 
-## 运行与维护
+## Run and maintain
 
 ```powershell
 D:\GISS\start-giss.cmd
@@ -53,6 +49,4 @@ D:\GISS\smoke-test.cmd
 D:\GISS\backup-giss.cmd
 ```
 
-当前只有 `127.0.0.1:8080` 对宿主机开放，数据库、API 和 Martin 不单独暴露端口。
-
-详细说明以根目录 `README.md` 和 `docs/ARCHITECTURE.md`、`docs/OPERATIONS.md`、`docs/REBUILD.md` 为准。
+Only `127.0.0.1:8080` is host-facing. Refer to the [README](../README.md), [architecture](ARCHITECTURE.md), [operations](OPERATIONS.md), and [rebuild guide](REBUILD.md) for authoritative details.

@@ -1,5 +1,7 @@
 # Architecture
 
+> English | [简体中文](ARCHITECTURE.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
 ## Design goals
 
 1. Work without internet after data and images are downloaded.
@@ -13,6 +15,7 @@
 flowchart LR
   Browser["Browser / MapLibre"] -->|"127.0.0.1:8080"| Nginx["nginx"]
   Nginx --> Web["Static UI, glyphs, sprites"]
+  Nginx --> Carto["Local OSM Carto raster"]
   Nginx --> PM["Selected regional PMTiles"]
   Nginx --> Overview["Local Natural Earth world overview"]
   Browser -. "explicit source selector" .-> OSMTiles["OpenStreetMap Standard raster"]
@@ -50,7 +53,7 @@ The resource inventory has two delivery paths. `GET /resources?cached=true` read
 
 `web/config/resource-catalog.json` provides the supported resource taxonomy. China points to 34 independent province datasets, while the generated `world-region-catalog.json` supplies the full Geofabrik continent/country/region hierarchy. Continents and the six Chinese geographic groups are presentation sections only; every downloadable row resolves to one physical pack and a concrete lifecycle command.
 
-A province is independently installed only after its PMTiles and manifest both pass validation; otherwise it is available or partially installed. Jiangsu, Anhui, Shanghai, and Zhejiang are the current independently installed provinces.
+A province is independently installed only after its PMTiles and manifest both pass validation; otherwise it is available, staged, or partially installed. Jiangsu and Anhui are the validated independently installed provinces in this documentation snapshot.
 
 `GET /api/resources` is the local inventory boundary. It combines disk capacity, filesystem usage, PostGIS size, regional pack state, shared search/route coverage, recovery-kit usage, and semantic update checks. With `check_upstream=true`, the API compares installed source sequence/timestamp metadata with trusted provider state files and caches the result. The browser presents that information as **Available**, **Local**, and **Updates** views. Jobs can be queued, cancelled, or retried, while heavy index rebuilds remain explicit and never enter the regular automatic batch.
 
@@ -97,11 +100,13 @@ SQL files under `services/postgis/migrations/` are ordered and recorded in `publ
 
 ## Map rendering
 
-`web/src/map-style.js` builds an OSM-like MapLibre style from the local catalog. It includes landcover, land use, water, roads, rail, buildings, boundaries, labels, POIs, offline glyphs, and offline sprites. Two visual modes reuse the same data and layer IDs.
+The default **OSM Original** source is rendered locally by the `osm-carto` service from its own imported OSM database and tile cache. Its build pipeline stages the source, resumes external-data preparation, validates the candidate renderer, and keeps the existing map available until the replacement is healthy.
 
-The active map is not a screenshot or raster cache. PMTiles contains vector features; MapLibre applies the local style at runtime. This keeps styling controllable and allows personal layers to remain interactive.
+The **Interactive Vector** source uses `web/src/map-style.js` to build an OSM-like MapLibre style from the local catalog. It includes landcover, land use, water, roads, rail, buildings, boundaries, labels, POIs, offline glyphs, and offline sprites. Two visual modes reuse the same data and layer IDs.
 
-The exception is the explicitly enabled online reference source. It is a temporary raster layer with persisted on/off preference and a dedicated quick action. The local Natural Earth overview and all installed regional vector packages remain the default, including when the network is absent.
+PMTiles contains vector features; MapLibre applies the local style at runtime. This keeps styling controllable and allows base features to remain clickable. Personal, route, terrain, weather, nautical, and emergency layers remain interactive above either local base-map source.
+
+Online OpenStreetMap Standard and OpenFreeMap are explicitly selected temporary references. The local Natural Earth overview, OSM Carto renderer, and installed regional vector packages remain available when the network is absent.
 
 Rendered vector features are queried directly in MapLibre when clicked. FastAPI then searches the nearby PostGIS reference index to enrich a tile feature with fuller OSM tags. Dense search and nearby results use client-side GeoJSON clustering through zoom 15. Saving never mutates OSM-derived tables; it creates an ordinary personal point, normally in the built-in Favorites collection.
 

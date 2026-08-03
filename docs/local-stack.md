@@ -1,37 +1,34 @@
-# 本地服务栈说明
+# Local Service Stack
 
-| 组件 | 作用 | 对宿主机开放 |
+> English | [简体中文](local-stack.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+
+| Component | Role | Host exposure |
 | --- | --- | --- |
-| nginx | 地图入口、静态资源、PMTiles Range、API/Martin 反向代理 | `127.0.0.1:8080` |
-| MapLibre | 浏览器矢量地图渲染、图层和交互 | 通过 nginx |
-| PMTiles | 苏皖 OSM 参考底图单文件 | 通过 `/tiles/` |
-| FastAPI | 点位/轨迹/照片 CRUD、GPX、搜索、导出 | 不开放 |
-| PostGIS | 个人地理数据、空间索引、版本和审计 | 不开放 |
-| Martin | 只发布审核过的 PostGIS 地图视图 | 不开放 |
-| Nominatim | 完整地址搜索与反向地址查询 | 不开放 |
-| Valhalla | 驾车、骑行和步行离线路线 | 不开放 |
-| Kiwix | 本地中文维基百科 | 通过 `/wiki/` |
-| HGT / Terrarium | 点高程、路线剖面和地形阴影 | 通过 `/api/` |
+| nginx | Single entry point, static assets, PMTiles Range, and reverse proxy | `127.0.0.1:8080` |
+| MapLibre | Browser map composition, vector rendering, and interaction | through nginx |
+| OSM Carto | Familiar locally rendered OSM raster map | through `/carto/` |
+| PMTiles | Independently versioned interactive regional vector maps | through `/tiles/` |
+| FastAPI | Personal CRUD, GPX, media, search, routing adapters, resources, and exports | internal |
+| PostGIS | Personal source of truth, spatial indexes, versions, and audit | internal |
+| Martin | Approved personal-data vector-tile views | internal |
+| Nominatim | Address search and reverse geocoding | internal |
+| Valhalla | Offline driving, cycling, and walking routes | internal |
+| Kiwix | Local Chinese Wikipedia and Wikivoyage | through `/wiki/` |
+| HGT/Terrarium | Elevation, profiles, hillshade, and contours | through `/api/` |
 
-## 为什么端口有时显示文字或 JSON
+## Why some URLs return JSON
 
-过去分别打开 Martin、PostGIS 或静态服务器端口时，看到的是目录、JSON 或错误文字。现在统一入口后，日常只访问：
+Use `http://localhost:8080/` for the application and `http://localhost:8080/resources.html` for resource management. `/api/health`, `/martin/catalog`, and `/healthz` are machine endpoints by design.
 
-```text
-http://localhost:8080/
-```
+## Why map data and personal data are separate
 
-其他路径是程序之间使用的接口。
+OSM maps, search indexes, routes, and caches are reproducible reference products. Personal places, tracks, photos, and notes are irreplaceable assets stored in PostGIS and `data/media`. A renderer or regional package can therefore be replaced without migrating personal records.
 
-## 为什么底图与个人数据分开
+## Current limits
 
-OSM 底图是可再生的参考数据，更新时可以整体替换 PMTiles。个人点位、轨迹、照片和备注是不可替代的私人资产，保存在 PostGIS 和 `data/media`，通过独立备份保护。这样以后扩展到全球底图、换渲染器或增加路由服务时，不需要迁移个人数据。
+- High-detail offline and shared search/route scope currently covers Jiangsu and Anhui.
+- The global catalog describes downloadable packages; it is not a preinstalled global map.
+- Chinese Wikipedia uses an all-mini archive and does not contain the full multimedia corpus.
+- The service has no account system and is safe only as a trusted localhost application.
 
-## 当前限制
-
-- 高倍离线底图当前覆盖江苏、安徽、上海和浙江；
-- 地址与路线索引也只覆盖已安装区域包的合并范围，并非全球；
-- 中文百科采用 all-mini 快照，不包含完整多媒体资源；
-- 本机入口没有账号系统，只适合 localhost 单用户环境。
-
-对应扩展方案见 `docs/ROADMAP.md`。
+See the [roadmap](ROADMAP.md) for planned expansion.
