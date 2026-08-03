@@ -1,6 +1,18 @@
 {
   "schemaVersion": 2,
   "version": "2026-07-31",
+  "localMaps": {
+    "osmCarto": {
+      "name": "本地 OSM 原版",
+      "tiles": ["/osm-carto/tile/{z}/{x}/{y}.png"],
+      "tileSize": 256,
+      "minZoom": 0,
+      "maxZoom": 20,
+      "bounds": [114.7, 29.25, 122.25, 35.45],
+      "attribution": "© OpenStreetMap contributors · OpenStreetMap Carto",
+      "copyrightUrl": "https://www.openstreetmap.org/copyright"
+    }
+  },
   "onlineMaps": {
     "osmStandard": {
       "name": "OpenStreetMap 在线标准图",
@@ -18,6 +30,13 @@
     }
   },
   "rootRegion": "world",
+  "downloadSections": [
+    { "id": "world-maps", "name": "世界地图", "resourceTypeIds": ["overview-map", "world-altitude-correction", "weather"] },
+    { "id": "nautical-maps", "name": "航海地图", "resourceTypeIds": ["nautical"] },
+    { "id": "travel-guides", "name": "旅行指南", "resourceTypeIds": ["travel-guide"] },
+    { "id": "other-maps", "name": "其他地图", "resourceTypeIds": ["encyclopedia"] },
+    { "id": "other", "name": "其他", "resourceTypeIds": ["tts", "fonts", "styles", "map-sources"] }
+  ],
   "regions": [
     { "id": "world", "name": "世界", "level": "world", "icon": "globe-2", "children": ["asia", "europe", "north-america", "south-america", "africa", "oceania", "antarctica"] },
     { "id": "asia", "name": "亚洲", "level": "continent", "icon": "earth", "parent": "world", "status": "available", "children": ["china"] },
@@ -31,17 +50,19 @@
     { "id": "world-overview", "name": "全球概览", "level": "resource", "icon": "globe-2", "parent": "world", "status": "ready" }
   ],
   "resourceTypes": [
-    { "id": "overview-map", "name": "全球离线概览", "icon": "map", "scope": "global", "support": "ready", "inventoryId": "overview-map", "installResourceId": "overview-map", "delivery": "base-map", "action": "overview", "description": "Natural Earth 全球概览、国界与主要城市" },
+    { "id": "overview-map", "name": "全球概览地图", "icon": "map", "scope": "global", "support": "ready", "inventoryId": "overview-map", "installResourceId": "overview-map", "delivery": "base-map", "action": "overview", "description": "Natural Earth 全球概览、国界与主要城市" },
+    { "id": "world-altitude-correction", "name": "全球海拔校正", "icon": "mountain", "scope": "global", "support": "planned", "delivery": "component", "description": "用于修正设备高程基准；与区域等高线和地形数据相互独立" },
     { "id": "online-osm", "name": "在线标准地图", "icon": "wifi", "scope": "global", "support": "online", "delivery": "base-map", "action": "online-map", "description": "按当前视口查看 OpenStreetMap，不用于离线批量下载" },
     { "id": "standard-map", "name": "标准地图", "icon": "map", "scope": "regional", "support": "ready", "delivery": "map-pack", "action": "standard-mode", "description": "完整道路、地名、地物与兴趣点" },
     { "id": "road-map", "name": "道路地图模式", "icon": "route", "scope": "regional", "support": "ready", "delivery": "style", "action": "road-mode", "description": "使用已安装矢量包的道路优先样式" },
     { "id": "contours", "name": "地形与等高线", "icon": "mountain-snow", "scope": "regional", "support": "partial", "inventoryId": "terrain", "delivery": "layer", "action": "contours", "description": "已下载 HGT 覆盖范围内的阴影与动态等高线" },
-    { "id": "weather", "name": "天气快照", "icon": "cloud-sun", "scope": "global", "support": "ready", "inventoryId": "weather", "installResourceId": "weather", "delivery": "layer", "action": "weather", "description": "Open-Meteo 七日预报本地快照图层" },
+    { "id": "weather", "name": "全世界天气预报", "icon": "umbrella", "scope": "global", "support": "ready", "inventoryId": "weather", "installResourceId": "weather", "delivery": "layer", "action": "weather", "description": "Open-Meteo 七日预报本地快照图层" },
     { "id": "encyclopedia", "name": "离线百科", "icon": "book-open", "scope": "global", "support": "ready", "inventoryId": "encyclopedia", "installResourceId": "encyclopedia", "delivery": "library", "action": "encyclopedia", "description": "在本地 Kiwix 中打开中文维基百科" },
     { "id": "travel-guide", "name": "旅行指南", "icon": "landmark", "scope": "global", "support": "ready", "inventoryId": "travel-guide", "installResourceId": "travel-guide", "delivery": "library", "action": "travel-guide", "description": "在本地 Kiwix 中打开中文维基导游" },
-    { "id": "nautical", "name": "航海参考", "icon": "anchor", "scope": "global", "support": "ready", "inventoryId": "nautical", "installResourceId": "nautical", "delivery": "layer", "action": "nautical", "description": "Natural Earth 海底地形与本地 OSM 航标图层" },
+    { "id": "nautical", "name": "航海地图", "icon": "anchor", "scope": "global", "support": "ready", "inventoryId": "nautical", "installResourceId": "nautical", "delivery": "layer", "action": "nautical", "description": "Natural Earth 海底地形与本地 OSM 航标图层" },
     { "id": "fonts", "name": "地图字体", "icon": "languages", "scope": "global", "support": "ready", "inventoryId": "web-assets", "delivery": "component", "action": "labels", "description": "离线中文与拉丁字形组件" },
-    { "id": "styles", "name": "渲染风格", "icon": "palette", "scope": "global", "support": "ready", "inventoryId": "web-assets", "delivery": "style", "action": "styles", "description": "标准与探索两套本地矢量样式" },
-    { "id": "tts", "name": "语音提示（TTS）", "icon": "volume-2", "scope": "global", "support": "ready", "inventoryId": "tts", "delivery": "component", "action": "tts", "description": "路线步骤使用 Windows 或浏览器本地中文语音" }
+    { "id": "styles", "name": "渲染风格", "icon": "palette", "scope": "global", "support": "ready", "inventoryId": "web-assets", "delivery": "style", "action": "styles", "description": "标准与丰富两套本地矢量样式" },
+    { "id": "tts", "name": "语音提示（TTS）", "icon": "volume-2", "scope": "global", "support": "ready", "inventoryId": "tts", "delivery": "component", "action": "tts", "description": "路线步骤使用 Windows 或浏览器本地中文语音" },
+    { "id": "map-sources", "name": "地图来源", "icon": "layers-3", "scope": "global", "support": "ready", "inventoryId": "web-assets", "delivery": "component", "description": "离线、OpenStreetMap 与 OpenFreeMap 来源配置" }
   ]
 }

@@ -60,8 +60,13 @@ WEB_RESOURCE_ROOT = Path(os.environ.get("WEB_RESOURCE_ROOT", "/data/web-resource
 WEATHER_RESOURCE_ROOT = Path(os.environ.get("WEATHER_RESOURCE_ROOT", "/data/weather-resources"))
 NAUTICAL_RESOURCE_ROOT = Path(os.environ.get("NAUTICAL_RESOURCE_ROOT", "/data/nautical-resources"))
 OVERVIEW_RESOURCE_ROOT = Path(os.environ.get("OVERVIEW_RESOURCE_ROOT", "/data/overview-resources"))
+OSM_CARTO_MANIFEST_PATH = Path(os.environ.get("OSM_CARTO_MANIFEST_PATH", "/data/osm-carto/osm-carto.manifest.json"))
+OSM_CARTO_CACHE_ROOT = Path(os.environ.get("OSM_CARTO_CACHE_ROOT", "/data/osm-carto-cache"))
+OSM_CARTO_URL = os.environ.get("OSM_CARTO_URL", "http://osm-carto:80").rstrip("/")
 MAINTENANCE_ROOT = Path(os.environ.get("MAINTENANCE_ROOT", "/data/maintenance"))
 RESOURCE_INVENTORY_CACHE_PATH = MAINTENANCE_ROOT / "resource-inventory-cache.json"
+RESOURCE_INVENTORY_REVISION_PATH = MAINTENANCE_ROOT / "resource-inventory-revision.json"
+RESOURCE_INVENTORY_SCHEMA = 3
 MAP_PACK_STATE_PATH = MAINTENANCE_ROOT / "map-pack-state.json"
 SHARED_INDEX_STATE_PATH = MAINTENANCE_ROOT / "shared-index-state.json"
 MAX_MEDIA_BYTES = 50 * 1024 * 1024
@@ -81,6 +86,7 @@ RESOURCE_CLASSIFICATIONS: dict[str, dict[str, str]] = {
     "terrain": {"resourceType": "elevation-grid", "storageClass": "primary", "scope": "regional", "validationPolicy": "hgt-name-and-byte-size"},
     "encyclopedia": {"resourceType": "encyclopedia", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-service-health"},
     "overview-map": {"resourceType": "overview-map", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-sha256"},
+    "osm-carto-renderer": {"resourceType": "standard-map", "storageClass": "rendered", "scope": "jiangsu-anhui", "validationPolicy": "manifest-and-service-health"},
     "weather": {"resourceType": "weather", "storageClass": "primary", "scope": "regional", "validationPolicy": "manifest-size-sha256-and-expiry"},
     "travel-guide": {"resourceType": "travel-guide", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-service-health"},
     "nautical": {"resourceType": "nautical", "storageClass": "primary", "scope": "regional", "validationPolicy": "manifest-size-and-sha256"},
@@ -91,6 +97,25 @@ RESOURCE_CLASSIFICATIONS: dict[str, dict[str, str]] = {
     "offline-kits": {"resourceType": "recovery-kit", "storageClass": "backup", "scope": "system", "validationPolicy": "full-manifest-sha256"},
     "web-assets": {"resourceType": "rendering-assets", "storageClass": "primary", "scope": "system", "validationPolicy": "runtime-load"},
     "regenerable-caches": {"resourceType": "cache", "storageClass": "cache", "scope": "system", "validationPolicy": "regenerable"},
+}
+
+RESOURCE_MANAGEMENT: dict[str, dict[str, str | bool]] = {
+    "standard-maps": {"managementMode": "map-packs", "managementLabel": "管理地图包"},
+    "map-rollbacks": {"managementMode": "map-packs", "managementLabel": "管理版本"},
+    "map-version-history": {"managementMode": "map-packs", "managementLabel": "查看版本"},
+    "osm-sources": {"managementMode": "map-packs", "managementLabel": "管理地图包"},
+    "source-rollbacks": {"managementMode": "map-packs", "managementLabel": "管理版本"},
+    "geocoder": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
+    "routing": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
+    "overview-map": {"managementMode": "maintenance", "managementResourceId": "overview-map", "managementLabel": "重新获取"},
+    "osm-carto-renderer": {"managementMode": "system", "managementLabel": "本地 OSM 原版"},
+    "weather": {"managementMode": "maintenance", "managementResourceId": "weather", "managementLabel": "刷新天气"},
+    "nautical": {"managementMode": "maintenance", "managementResourceId": "nautical", "managementLabel": "重建"},
+    "encyclopedia": {"managementMode": "maintenance", "managementResourceId": "encyclopedia", "managementLabel": "重新获取", "managementHeavy": True},
+    "travel-guide": {"managementMode": "maintenance", "managementResourceId": "travel-guide", "managementLabel": "重新获取", "managementHeavy": True},
+    "personal-database": {"managementMode": "application", "managementHref": "/", "managementLabel": "打开数据"},
+    "personal-media": {"managementMode": "application", "managementHref": "/", "managementLabel": "打开数据"},
+    "regenerable-caches": {"managementMode": "cache", "managementLabel": "清理缓存"},
 }
 
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -408,7 +433,10 @@ def maintenance_jobs() -> list[dict[str, Any]]:
         job = read_json_file(path)
         if job:
             jobs.append(job)
-    return sorted(jobs, key=lambda item: str(item.get("requestedAt", "")), reverse=True)[:100]
+    ordered = sorted(jobs, key=lambda item: str(item.get("requestedAt", "")), reverse=True)
+    active = [job for job in ordered if job.get("status") in {"queued", "running"}]
+    completed = [job for job in ordered if job.get("status") not in {"queued", "running"}][:100]
+    return sorted(active + completed, key=lambda item: str(item.get("requestedAt", "")), reverse=True)
 
 
 def maintenance_file_tail(relative_path: str) -> str:
@@ -442,7 +470,7 @@ def scaled_log_number(value: str, binary: bool = False) -> float | None:
 
 
 def maintenance_activity(job: dict[str, Any], log: str, stage: str) -> dict[str, Any] | None:
-    if stage == "生成地图瓦片":
+    if stage in {"生成地图瓦片", "生成丰富地点详情"}:
         archive = re.findall(
             r"features:\s*\[\s*(\S+)\s+(\d+)%\s+(\S+/s)\s*\]\s+(\S+)\s+tiles:\s*\[\s*(\S+)\s+(\S+/s)\s*\]\s+(\S+)",
             log,
@@ -450,9 +478,22 @@ def maintenance_activity(job: dict[str, Any], log: str, stage: str) -> dict[str,
         if archive:
             feature_count, feature_percent, feature_rate, _, tile_count, tile_rate, output_size = archive[-1]
             output_bytes = scaled_log_number(output_size, binary=True)
-            existing_product = MAP_PACK_ROOT / f"{job.get('resourceId')}.pmtiles"
-            expected_bytes = existing_product.stat().st_size if existing_product.is_file() else 0
+            if stage == "生成丰富地点详情":
+                existing_products = sorted(
+                    MAP_PACK_ROOT.glob(f"{job.get('resourceId')}.details.*.pmtiles"),
+                    key=lambda path: path.stat().st_mtime_ns,
+                    reverse=True,
+                )
+                existing_product = existing_products[0] if existing_products else None
+            else:
+                existing_product = MAP_PACK_ROOT / f"{job.get('resourceId')}.pmtiles"
+            expected_bytes = existing_product.stat().st_size if existing_product and existing_product.is_file() else 0
             product_percent = min(99, int((output_bytes or 0) / expected_bytes * 100)) if expected_bytes else None
+            if product_percent is None:
+                zoom_rows = re.findall(r"last tile:.*\(z(\d+)\s+(\d+)%\)", log)
+                if zoom_rows:
+                    zoom, zoom_percent = (int(value) for value in zoom_rows[-1])
+                    product_percent = min(99, zoom_percent if zoom >= 16 else min(60, zoom * 4))
             return {
                 "kind": "generation",
                 "rate": scaled_log_number(tile_rate.removesuffix("/s")),
@@ -535,12 +576,54 @@ def maintenance_progress(job: dict[str, Any], queue_position: int | None = None)
             "kind": "indeterminate", "percent": None, "stage": "准备后台候选索引",
             "queuePosition": None, "step": 0, "steps": 5, "serviceContinuity": True,
         }
+    if job.get("operation") == "nautical":
+        log = maintenance_log_text(job)
+        markers = re.findall(r"NAUTICAL_STAGE\s+(\d+)/(\d+)\s+(FILTER|CACHE|MERGE|EXPORT|VERIFY)(?:\s+(\d+)/(\d+))?", log)
+        if markers:
+            step_value, steps_value, phase, item_value, total_value = markers[-1]
+            step = int(step_value)
+            steps = int(steps_value)
+            labels = {
+                "FILTER": "筛选已安装区域航海要素", "CACHE": "复用区域航海缓存",
+                "MERGE": "合并区域航海要素", "EXPORT": "生成航海图层", "VERIFY": "校验并切换航海资源",
+            }
+            base_percent = {1: 8, 2: 58, 3: 76, 4: 92}.get(step, 5)
+            percent = base_percent
+            activity = None
+            if step == 1 and item_value and total_value:
+                processed = int(item_value)
+                total = max(1, int(total_value))
+                percent = min(55, 8 + round(processed / total * 47))
+                activity = {"processed": processed, "total": total, "processedUnit": "区域", "percent": percent}
+            return {
+                "kind": "staged", "percent": percent, "stage": labels.get(phase, "生成航海资源"),
+                "queuePosition": None, "step": step, "steps": steps, "activity": activity,
+                "serviceContinuity": True,
+            }
+        return {
+            "kind": "indeterminate", "percent": None, "stage": "读取已安装区域资源",
+            "queuePosition": None, "step": 0, "steps": 4, "serviceContinuity": True,
+        }
     if job.get("operation") != "region-pack":
         return {"kind": "indeterminate", "percent": None, "stage": "正在执行维护脚本", "queuePosition": None, "step": 1, "steps": 1}
     if job.get("action") == "verify":
         return {"kind": "indeterminate", "percent": None, "stage": "校验地图文件与哈希", "queuePosition": None, "step": 1, "steps": 1}
 
     log = maintenance_log_text(job)
+    detail_markers = re.findall(r"DETAIL_STAGE\s+(\d+)/(\d+)\s+(BUILD|VERIFY|CLEAN)", log)
+    if detail_markers:
+        _, _, phase = detail_markers[-1]
+        labels = {
+            "BUILD": "生成丰富地点详情",
+            "VERIFY": "校验丰富地点详情",
+            "CLEAN": "切换并清理旧详情版本",
+        }
+        percent = {"BUILD": 88, "VERIFY": 97, "CLEAN": 99}[phase]
+        activity = maintenance_activity(job, log, labels[phase]) if phase == "BUILD" else None
+        return {
+            "kind": "staged", "percent": percent, "stage": labels[phase], "queuePosition": None,
+            "step": 5, "steps": 5, "activity": activity, "serviceContinuity": True,
+        }
     stages = (
         ("Building staged", 4, 68, "生成地图瓦片"),
         ("Merging ", 3, 48, "合并并检查区域数据"),
@@ -1046,6 +1129,21 @@ def read_state_file(path: Path) -> dict[str, str]:
     return values
 
 
+def source_sequence_relation(remote: str, local: str) -> int | None:
+    remote_value = str(remote or "").strip()
+    local_value = str(local or "").strip()
+    if not remote_value or not local_value:
+        return None
+    if remote_value == local_value:
+        return 0
+    try:
+        remote_number = int(remote_value)
+        local_number = int(local_value)
+    except ValueError:
+        return None
+    return 1 if remote_number > local_number else -1
+
+
 def osm_catalog_file(relative_path: str) -> Path | None:
     normalized = relative_path.replace("\\", "/").removeprefix("raw/osm/")
     parts = Path(normalized).parts
@@ -1092,7 +1190,8 @@ def expand_region_dataset(
     }
 
 
-def map_catalog() -> dict[str, Any]:
+@lru_cache(maxsize=4)
+def cached_map_catalog(_revision: tuple[tuple[int, int], ...]) -> dict[str, Any]:
     try:
         catalog = json.loads(MAP_CATALOG_PATH.read_text(encoding="utf-8"))
         region_catalog = json.loads(REGION_CATALOG_PATH.read_text(encoding="utf-8"))
@@ -1133,6 +1232,17 @@ def map_catalog() -> dict[str, Any]:
     }
 
 
+def map_catalog() -> dict[str, Any]:
+    revision: list[tuple[int, int]] = []
+    for path in (MAP_CATALOG_PATH, REGION_CATALOG_PATH, WORLD_REGION_CATALOG_PATH):
+        try:
+            stat = path.stat()
+            revision.append((stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            revision.append((-1, -1))
+    return cached_map_catalog(tuple(revision))
+
+
 def pack_file(url: str) -> Path:
     filename = Path(url).name
     if not filename or filename != url.rstrip("/").rsplit("/", 1)[-1]:
@@ -1162,11 +1272,50 @@ def set_map_pack_enabled(pack_id: str, enabled: bool) -> dict[str, Any]:
         "updatedAt": datetime.now().astimezone().isoformat(),
     })
     write_json_file(MAP_PACK_STATE_PATH, preferences)
+    invalidate_resource_inventory()
+    return preferences
+
+
+def resource_inventory_revision() -> str:
+    marker = read_json_file(RESOURCE_INVENTORY_REVISION_PATH) or {}
+    signatures: list[tuple[str, int, int]] = []
     try:
-        RESOURCE_INVENTORY_CACHE_PATH.unlink(missing_ok=True)
+        paths = sorted(
+            path for path in MAP_PACK_ROOT.iterdir()
+            if path.is_file() and ".staged." not in path.name and ".swap-" not in path.name
+        )
+    except OSError:
+        paths = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            signatures.append((path.name, stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            continue
+    state_signature: tuple[int, int] | None = None
+    try:
+        stat = MAP_PACK_STATE_PATH.stat()
+        state_signature = (stat.st_size, stat.st_mtime_ns)
     except OSError:
         pass
-    return preferences
+    payload = json.dumps(
+        {
+            "schema": RESOURCE_INVENTORY_SCHEMA,
+            "marker": marker.get("revision"),
+            "mapPacks": signatures,
+            "preferences": state_signature,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def invalidate_resource_inventory() -> None:
+    write_json_file(
+        RESOURCE_INVENTORY_REVISION_PATH,
+        {"revision": uuid.uuid4().hex, "changedAt": datetime.now().astimezone().isoformat()},
+    )
 
 
 LEGACY_PACK_REPLACEMENTS = {
@@ -1214,7 +1363,7 @@ def map_pack_state(
     common_state: dict[str, str] | None = None,
     disabled_pack_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    enabled = str(dataset.get("id")) not in (disabled_pack_ids if disabled_pack_ids is not None else set(map_pack_preferences()["disabledPackIds"]))
+    preference_enabled = str(dataset.get("id")) not in (disabled_pack_ids if disabled_pack_ids is not None else set(map_pack_preferences()["disabledPackIds"]))
     product_path = pack_file(str(dataset.get("url", "")))
     manifest_path = pack_file(str(dataset.get("manifestUrl", "")))
     manifest = None
@@ -1227,17 +1376,38 @@ def map_pack_state(
     product_exists = product_path.name in known_pack_files if known_pack_files is not None else product_path.is_file()
     manifest_exists = manifest is not None
     installed = product_exists and manifest_exists
+    enabled = installed and preference_enabled
     actual_bytes = product_path.stat().st_size if product_exists else 0
     expected_product = manifest.get("product", {}) if manifest else {}
     expected_bytes = int(expected_product.get("bytes", 0) or 0)
-    size_matches = installed and expected_bytes > 0 and actual_bytes == expected_bytes
+    expected_details = manifest.get("details", {}) if manifest and isinstance(manifest.get("details"), dict) else {}
+    details_path = pack_file(str(expected_details.get("url") or expected_details.get("file"))) if expected_details else None
+    details_exists = bool(details_path and details_path.is_file())
+    details_bytes = details_path.stat().st_size if details_exists else 0
+    expected_details_bytes = int(expected_details.get("bytes", 0) or 0)
+    details_size_matches = bool(
+        details_exists and expected_details_bytes > 0 and details_bytes == expected_details_bytes
+    )
+    rich_details_ready = bool(expected_details and details_size_matches)
+    size_matches = bool(
+        installed and expected_bytes > 0 and actual_bytes == expected_bytes and rich_details_ready
+    )
     verification = "not-run"
     if verify_sha256 and installed:
         digest = hashlib.sha256()
         with product_path.open("rb") as stream:
             for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
                 digest.update(block)
-        verification = "verified" if size_matches and digest.hexdigest() == expected_product.get("sha256") else "failed"
+        details_digest = hashlib.sha256()
+        if details_exists:
+            with details_path.open("rb") as stream:
+                for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+                    details_digest.update(block)
+        verification = "verified" if (
+            size_matches
+            and digest.hexdigest() == expected_product.get("sha256")
+            and details_digest.hexdigest() == expected_details.get("sha256")
+        ) else "failed"
     source_profile = dataset.get("sourceProfile", {}) if isinstance(dataset.get("sourceProfile"), dict) else {}
     state_path = osm_catalog_file(str(source_profile.get("stateFile", "")))
     snapshot_path = osm_catalog_file(str(source_profile.get("snapshotFile", "")))
@@ -1259,11 +1429,40 @@ def map_pack_state(
     source = manifest.get("source", {}) if manifest else {}
     source_sequence = str(source.get("sequenceNumber") or "")
     current_sequence = str(current_state.get("sequenceNumber") or "")
-    update_available = bool(installed and source_sequence and current_sequence and source_sequence != current_sequence)
+    sequence_relation = source_sequence_relation(current_sequence, source_sequence)
+    update_available = bool(installed and sequence_relation is not None and sequence_relation > 0)
     previous_product_path = MAP_PACK_ROOT / f"{dataset.get('id')}.previous.pmtiles"
     previous_manifest_path = MAP_PACK_ROOT / f"{dataset.get('id')}.previous.manifest.json"
-    previous_manifest = read_json_file(previous_manifest_path) if previous_manifest_path.is_file() else None
-    rollback_ready = previous_product_path.is_file() and previous_manifest is not None
+    previous_product_exists = previous_product_path.name in known_pack_files if known_pack_files is not None else previous_product_path.is_file()
+    previous_manifest_exists = previous_manifest_path.name in known_pack_files if known_pack_files is not None else previous_manifest_path.is_file()
+    previous_manifest = read_json_file(previous_manifest_path) if previous_manifest_exists else None
+    rollback_details = previous_manifest.get("details", {}) if previous_manifest and isinstance(previous_manifest.get("details"), dict) else {}
+    rollback_details_path = pack_file(str(rollback_details.get("url") or rollback_details.get("file"))) if rollback_details else None
+    rollback_details_exists = bool(rollback_details_path and rollback_details_path.is_file())
+    rollback_details_bytes = rollback_details_path.stat().st_size if rollback_details_exists else 0
+    rollback_artifacts = previous_product_exists or previous_manifest is not None or rollback_details_exists
+    rollback_ready = bool(
+        previous_product_exists
+        and previous_manifest is not None
+        and rollback_details
+        and rollback_details_exists
+    )
+    staged_product_path = MAP_PACK_ROOT / f"{dataset.get('id')}.staged.pmtiles"
+    if known_pack_files is not None:
+        artifact_names = {
+            product_path.name, manifest_path.name, previous_product_path.name,
+            previous_manifest_path.name, staged_product_path.name,
+        }
+        if details_path:
+            artifact_names.add(details_path.name)
+        has_local_artifacts = bool(artifact_names & known_pack_files) or any(
+            name.startswith(f"{dataset.get('id')}.swap-") for name in known_pack_files
+        )
+    else:
+        has_local_artifacts = any(
+            path.is_file()
+            for path in (product_path, manifest_path, previous_product_path, previous_manifest_path, staged_product_path)
+        ) or any(MAP_PACK_ROOT.glob(f"{dataset.get('id')}.swap-*"))
     rollback_product = previous_manifest.get("product", {}) if previous_manifest else {}
     rollback_source = previous_manifest.get("source", {}) if previous_manifest else {}
     return {
@@ -1302,8 +1501,15 @@ def map_pack_state(
         "buildReady": source_acquirable and boundary_ready,
         "installed": installed,
         "enabled": enabled,
-        "partialInstall": product_exists != manifest_exists,
-        "bytes": actual_bytes,
+        "hasLocalArtifacts": has_local_artifacts,
+        "partialInstall": product_exists != manifest_exists or bool(expected_details and not details_exists),
+        "bytes": actual_bytes + details_bytes,
+        "productBytes": actual_bytes,
+        "detailsBytes": details_bytes,
+        "detailsUrl": expected_details.get("url") if rich_details_ready else None,
+        "detailsLayer": expected_details.get("layer") if rich_details_ready else None,
+        "richDetailsReady": rich_details_ready,
+        "detailsSizeMatches": details_size_matches,
         "sizeMatches": size_matches,
         "verification": verification,
         "updateAvailable": update_available,
@@ -1314,13 +1520,15 @@ def map_pack_state(
         "currentSourceSequence": current_sequence or None,
         "currentSourceUpdatedAt": current_state.get("timestamp"),
         "rollbackReady": rollback_ready,
-        "rollbackBytes": previous_product_path.stat().st_size if previous_product_path.is_file() else 0,
+        "rollbackArtifacts": rollback_artifacts,
+        "rollbackBytes": (previous_product_path.stat().st_size if previous_product_exists else 0) + rollback_details_bytes,
         "rollbackGeneratedAt": previous_manifest.get("generatedAt") if previous_manifest else None,
         "rollbackSourceSequence": rollback_source.get("sequenceNumber") if rollback_source else None,
         "rollbackSourceUpdatedAt": rollback_source.get("updatedAt") if rollback_source else None,
         "rollbackSizeMatches": bool(
             rollback_ready
             and int(rollback_product.get("bytes", 0) or 0) == previous_product_path.stat().st_size
+            and int(rollback_details.get("bytes", 0) or 0) == rollback_details_bytes
         ),
     }
 
@@ -1361,6 +1569,39 @@ def map_pack_states(catalog: dict[str, Any], verify_sha256: bool = False) -> lis
         pack["coverageMode"] = "independent" if pack["installed"] else "none"
         pack["browsePackId"] = str(pack["id"]) if pack["installed"] else None
     return packs
+
+
+def map_pack_state_for_id(catalog: dict[str, Any], pack_id: str) -> dict[str, Any] | None:
+    dataset = next((item for item in catalog["datasets"] if str(item.get("id")) == pack_id), None)
+    if dataset is None:
+        return None
+    return map_pack_state(
+        dataset,
+        common_state=current_osm_state(),
+        disabled_pack_ids=set(map_pack_preferences()["disabledPackIds"]),
+    )
+
+
+def installed_map_pack_states(catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        known_pack_files = {entry.name for entry in MAP_PACK_ROOT.iterdir() if entry.is_file()}
+    except OSError:
+        known_pack_files = set()
+    disabled_pack_ids = set(map_pack_preferences()["disabledPackIds"])
+    common_state = current_osm_state()
+    states: list[dict[str, Any]] = []
+    for dataset in catalog["datasets"]:
+        if Path(str(dataset.get("url") or "")).name not in known_pack_files:
+            continue
+        state = map_pack_state(
+            dataset,
+            known_pack_files=known_pack_files,
+            common_state=common_state,
+            disabled_pack_ids=disabled_pack_ids,
+        )
+        if state["installed"]:
+            states.append(state)
+    return states
 
 
 def read_osmosis_poly(path: Path) -> dict[str, list[list[list[float]]]]:
@@ -1419,13 +1660,14 @@ def list_map_packs() -> dict[str, Any]:
         remote = upstream_sources.get(str(profile.get("stateUrl") or ""), {})
         remote_sequence = str(remote.get("sequenceNumber") or "")
         installed_sequence = str(pack.get("sourceSequence") or "")
+        sequence_relation = source_sequence_relation(remote_sequence, installed_sequence)
         pack["upstreamSourceSequence"] = remote_sequence or None
         pack["upstreamSourceUpdatedAt"] = remote.get("timestamp")
         pack["lastCheckedAt"] = remote.get("checkedAt") or upstream.get("checkedAt")
         pack["updateError"] = remote.get("error")
-        if pack["installed"] and remote_sequence and installed_sequence:
-            pack["updateAvailable"] = remote_sequence != installed_sequence
-            pack["updateStatus"] = "upstream" if pack["updateAvailable"] else "current"
+        if pack["installed"] and sequence_relation is not None:
+            pack["updateAvailable"] = sequence_relation > 0
+            pack["updateStatus"] = "upstream" if sequence_relation > 0 else "current" if sequence_relation == 0 else "local-newer"
         elif pack["installed"]:
             pack["updateStatus"] = "unknown"
     provinces = [pack for pack in packs if pack["kind"] == "province"]
@@ -1444,12 +1686,15 @@ def list_map_packs() -> dict[str, Any]:
 @app.put("/map-packs/{pack_id}/activation")
 def update_map_pack_activation(pack_id: str, payload: MapPackActivationInput) -> dict[str, Any]:
     catalog = map_catalog()
-    packs = {str(pack["id"]): pack for pack in map_pack_states(catalog)}
-    pack = packs.get(pack_id)
+    installed_states = installed_map_pack_states(catalog)
+    packs = {str(pack["id"]): pack for pack in installed_states}
+    pack = packs.get(pack_id) or map_pack_state_for_id(catalog, pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Map pack not found")
     if not pack["installed"]:
         raise HTTPException(status_code=409, detail="Only installed map packs can be activated or deactivated")
+    if any(job.get("resourceId") == pack_id and job.get("status") in {"queued", "running"} for job in maintenance_jobs()):
+        raise HTTPException(status_code=409, detail="Map pack activation cannot change while a maintenance task is active")
     enabled_installed = [item for item in packs.values() if item["installed"] and item["enabled"]]
     if not payload.enabled and pack["enabled"] and len(enabled_installed) <= 1:
         raise HTTPException(status_code=409, detail="At least one installed map pack must remain enabled")
@@ -1529,14 +1774,14 @@ def get_map_pack_versions(pack_id: str) -> dict[str, Any]:
     }
 
 
-def cache_inventory() -> list[dict[str, Any]]:
+def cache_inventory(precomputed: dict[str, dict[str, int]] | None = None) -> list[dict[str, Any]]:
     definitions = [
         ("terrain-tiles", "地形瓦片缓存", TERRAIN_CACHE_ROOT, "浏览等高线时自动重新生成"),
         ("build-temp", "地图构建临时缓存", BUILD_CACHE_ROOT, "地图包构建时自动重新生成"),
     ]
     items = []
     for cache_id, name, path, description in definitions:
-        usage = directory_usage(path)
+        usage = (precomputed or {}).get(cache_id) or directory_usage(path)
         items.append({
             "id": cache_id, "name": name, "pathLabel": path.name,
             "bytes": usage["bytes"], "files": usage["files"],
@@ -1633,11 +1878,12 @@ def clear_cache(cache_id: str, confirm: str = Query(default="")) -> dict[str, An
                 shutil.rmtree(child)
             else:
                 child.unlink(missing_ok=True)
-        RESOURCE_INVENTORY_CACHE_PATH.unlink(missing_ok=True)
+    invalidate_resource_inventory()
     return {"id": cache_id, "cleared": True, "clearedAt": datetime.now().astimezone().isoformat()}
 
 
 def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
+    inventory_revision = resource_inventory_revision()
     catalog = map_catalog()
     packs = map_pack_states(catalog)
     installed_packs = [pack for pack in packs if pack["installed"]]
@@ -1669,10 +1915,11 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         remote_state = upstream_sources.get(state_url, {}) if state_url else {}
         remote_sequence = str(remote_state.get("sequenceNumber") or "")
         local_sequence = str(pack.get("sourceSequence") or "")
+        sequence_relation = source_sequence_relation(remote_sequence, local_sequence)
         checked_at = remote_state.get("checkedAt") or upstream_cache.get("checkedAt")
-        if remote_sequence and local_sequence:
-            pack["updateAvailable"] = remote_sequence != local_sequence
-            pack["updateStatus"] = "upstream" if pack["updateAvailable"] else "current"
+        if sequence_relation is not None:
+            pack["updateAvailable"] = sequence_relation > 0
+            pack["updateStatus"] = "upstream" if sequence_relation > 0 else "current" if sequence_relation == 0 else "local-newer"
             pack["upstreamSourceSequence"] = remote_sequence
             pack["upstreamSourceUpdatedAt"] = remote_state.get("timestamp")
         else:
@@ -1682,7 +1929,7 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         pack["updateError"] = remote_state.get("error")
     installed_source_hashes = {
         str(pack["id"]): str(pack.get("sourceSha256") or "")
-        for pack in installed_packs
+        for pack in enabled_installed_packs
     }
     capability_source_hashes = {
         str(item.get("id")): str(item.get("sha256") or "")
@@ -1694,8 +1941,9 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         "map": MAP_PACK_ROOT, "osm": OSM_RESOURCE_ROOT, "routing": ROUTING_RESOURCE_ROOT,
         "elevation": ELEVATION_ROOT, "encyclopedia": ENCYCLOPEDIA_RESOURCE_ROOT, "web": WEB_RESOURCE_ROOT,
         "weather": WEATHER_RESOURCE_ROOT, "nautical": NAUTICAL_RESOURCE_ROOT, "overview": OVERVIEW_RESOURCE_ROOT,
-        "terrain_cache": TERRAIN_CACHE_ROOT, "media": MEDIA_ROOT, "backup": BACKUP_ROOT,
-        "build_cache": BUILD_CACHE_ROOT,
+        "terrain_cache": TERRAIN_CACHE_ROOT, "osm_carto_cache": OSM_CARTO_CACHE_ROOT,
+        "media": MEDIA_ROOT, "backup": BACKUP_ROOT,
+        "build_cache": BUILD_CACHE_ROOT, "offline": OFFLINE_KIT_ROOT,
     }
     with ThreadPoolExecutor(max_workers=8, thread_name_prefix="resource-usage") as executor:
         usage_values = dict(zip(usage_paths, executor.map(directory_usage, usage_paths.values()), strict=True))
@@ -1709,17 +1957,19 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     nautical_usage = usage_values["nautical"]
     overview_usage = usage_values["overview"]
     terrain_cache_usage = usage_values["terrain_cache"]
+    osm_carto_cache_usage = usage_values["osm_carto_cache"]
     build_cache_usage = usage_values["build_cache"]
     media_usage = usage_values["media"]
     backup_usage = usage_values["backup"]
+    offline_kit_usage_value = usage_values["offline"]
     current_map_paths: list[Path] = []
     for pack in installed_packs:
-        current_map_paths.extend(
-            (
-                MAP_PACK_ROOT / f"{pack['id']}.pmtiles",
-                MAP_PACK_ROOT / f"{pack['id']}.manifest.json",
-            )
-        )
+        current_map_paths.extend((
+            MAP_PACK_ROOT / f"{pack['id']}.pmtiles",
+            MAP_PACK_ROOT / f"{pack['id']}.manifest.json",
+        ))
+        if pack.get("detailsUrl"):
+            current_map_paths.append(pack_file(str(pack["detailsUrl"])))
     current_map_usage = selected_file_usage(current_map_paths)
     rollback_map_paths: list[Path] = []
     pending_version_metadata_paths: list[Path] = []
@@ -1728,6 +1978,12 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         previous_product_path = MAP_PACK_ROOT / f"{pack_id}.previous.pmtiles"
         if previous_product_path.is_file():
             rollback_map_paths.extend((previous_product_path, previous_manifest_path))
+            previous_manifest = read_json_file(previous_manifest_path) or {}
+            previous_details = previous_manifest.get("details", {}) if isinstance(previous_manifest.get("details"), dict) else {}
+            if previous_details:
+                previous_details_path = pack_file(str(previous_details.get("url") or previous_details.get("file") or ""))
+                if previous_details_path.is_file():
+                    rollback_map_paths.append(previous_details_path)
         else:
             pending_version_metadata_paths.append(previous_manifest_path)
     rollback_map_usage = selected_file_usage(rollback_map_paths)
@@ -1809,7 +2065,6 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             - legacy_source_usage["files"],
         ),
     }
-    offline_kit_usage_value = offline_kit_usage()
     offline_kit_directories = [path for path in OFFLINE_KIT_ROOT.iterdir() if path.is_dir()] if OFFLINE_KIT_ROOT.is_dir() else []
     verified_offline_kits = sum(1 for path in offline_kit_directories if not path.name.endswith(".failed") and offline_kit_is_verified(path))
     failed_offline_kits = sum(1 for path in offline_kit_directories if path.name.endswith(".failed"))
@@ -1833,6 +2088,8 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     weather_manifest = read_json_file(WEATHER_RESOURCE_ROOT / "weather.manifest.json") or {}
     nautical_manifest = read_json_file(NAUTICAL_RESOURCE_ROOT / "nautical.manifest.json") or {}
     overview_manifest = read_json_file(OVERVIEW_RESOURCE_ROOT / "overview.manifest.json") or {}
+    osm_carto_manifest = read_json_file(OSM_CARTO_MANIFEST_PATH) or {}
+    osm_carto_database_bytes = int((osm_carto_manifest.get("storage") or {}).get("databaseBytes", 0) or 0)
     world_catalog = read_json_file(WORLD_REGION_CATALOG_PATH) or {}
     encyclopedia_state = declared_file_state(
         ENCYCLOPEDIA_RESOURCE_ROOT,
@@ -1856,6 +2113,12 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         "seamarks.geojson",
         hash_small_files=True,
     )
+    nautical_source_hashes = {
+        str(item.get("id")): str(item.get("sha256") or "")
+        for item in nautical_manifest.get("inputs", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    nautical_inputs_current = nautical_source_hashes == installed_source_hashes
     overview_files = overview_manifest.get("files") if isinstance(overview_manifest.get("files"), list) else []
     overview_valid = bool(overview_files) and all(
         isinstance(entry, dict)
@@ -1886,11 +2149,12 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         ]
     )
     shared_scope = shared_index_scope_state()
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="resource-service") as executor:
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="resource-service") as executor:
         service_futures = {
             "geocoder": executor.submit(upstream_available, NOMINATIM_URL, "/status"),
             "routing": executor.submit(upstream_available, VALHALLA_URL, "/status"),
             "encyclopedia": executor.submit(upstream_available, KIWIX_URL, "/wiki/"),
+            "osm-carto": executor.submit(upstream_available, OSM_CARTO_URL, "/"),
         }
         services_available = {name: future.result() for name, future in service_futures.items()}
     disk = shutil.disk_usage(MEDIA_ROOT)
@@ -1906,6 +2170,9 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             build_cache_usage["bytes"],
             weather_usage["bytes"],
             nautical_usage["bytes"],
+            overview_usage["bytes"],
+            osm_carto_database_bytes,
+            osm_carto_cache_usage["bytes"],
             media_usage["bytes"],
             backup_usage["bytes"],
             offline_kit_usage_value["bytes"],
@@ -1919,11 +2186,11 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "name": "资源",
             "items": [
                 {"id": "standard-maps", "name": "当前标准地图", "icon": "map", "bytes": current_map_usage["bytes"], "files": current_map_usage["files"], "status": "warning" if any(not pack["sizeMatches"] for pack in installed_packs) else "ready", "subtitle": f"{len(enabled_installed_packs)} 个启用 · {len(installed_packs) - len(enabled_installed_packs)} 个停用 · 清单尺寸已核对"},
-                {"id": "map-rollbacks", "name": "地图回退副本", "icon": "history", "bytes": rollback_map_usage["bytes"], "files": rollback_map_usage["files"], "status": "warning" if any(pack["rollbackReady"] and not pack["rollbackSizeMatches"] for pack in installed_packs) else ("ready" if rollback_map_usage["files"] else "missing"), "subtitle": "仅保留与当前版本不同的最近一版 · 成对清单已核对"},
+                {"id": "map-rollbacks", "name": "地图回退副本", "icon": "history", "bytes": rollback_map_usage["bytes"], "files": rollback_map_usage["files"], "status": "warning" if any(pack["rollbackArtifacts"] and (not pack["rollbackReady"] or not pack["rollbackSizeMatches"]) for pack in installed_packs) else ("ready" if rollback_map_usage["files"] else "missing"), "subtitle": "当前与上一版均含标准地图和丰富详情时才可回退"},
                 {"id": "map-build-staging", "name": "正在生成的地图", "icon": "loader-circle", "bytes": staged_map_usage["bytes"], "files": staged_map_usage["files"], "status": "warning" if staged_map_usage["files"] else "missing", "subtitle": "构建成功后原子替换，失败时可清理"},
                 {"id": "map-version-history", "name": "地图版本清单", "icon": "notebook-tabs", "bytes": version_history_usage["bytes"], "files": version_history_usage["files"], "status": "ready" if version_history_usage["files"] else "missing", "subtitle": "只保存来源、时间与哈希，不复制地图大文件"},
                 {"id": "other-map-products", "name": "未归类地图产物", "icon": "file-question", "bytes": other_map_usage["bytes"], "files": other_map_usage["files"], "status": "warning" if other_map_usage["files"] else "missing", "subtitle": "暂存、旧目录或没有有效清单的文件"},
-                {"id": "osm-sources", "name": "已接管 OSM 构建源", "icon": "database", "bytes": owned_osm_usage["bytes"], "files": owned_osm_usage["files"], "status": "ready", "subtitle": f"共享中国快照仅计一次 · {current_state.get('timestamp', '--')}"},
+                {"id": "osm-sources", "name": "已接管 OSM 构建源", "icon": "database", "bytes": owned_osm_usage["bytes"], "files": owned_osm_usage["files"], "status": "ready" if owned_osm_usage["files"] and current_state.get("sequenceNumber") else ("warning" if owned_osm_usage["files"] else "missing"), "subtitle": f"共享中国快照仅计一次 · {current_state.get('timestamp', '缺少可信状态')}"},
                 {"id": "source-rollbacks", "name": "源快照回退副本", "icon": "history", "bytes": rollback_source_usage["bytes"], "files": rollback_source_usage["files"], "status": "ready" if rollback_source_usage["files"] else "missing", "subtitle": "更新失败时可恢复的上一份完整源"},
                 {"id": "legacy-source-comparisons", "name": "旧版省级对照源", "icon": "archive", "bytes": legacy_source_usage["bytes"], "files": legacy_source_usage["files"], "status": "archive" if legacy_source_usage["files"] else "missing", "subtitle": "不参与当前构建，仅用于来源对照"},
                 {"id": "staged-source-downloads", "name": "待验证源下载", "icon": "download", "bytes": staged_source_usage["bytes"], "files": staged_source_usage["files"], "status": "warning" if staged_source_usage["files"] else "missing", "subtitle": "可续用的下载暂存，不是已安装资源"},
@@ -1932,9 +2199,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
                 {"id": "terrain", "name": "地形与等高线", "icon": "mountain-snow", "bytes": elevation_usage["bytes"], "files": elevation_usage["files"], "status": "ready" if elevation_valid else ("warning" if elevation_files else "missing"), "subtitle": f"{elevation_usage['files']} 个 HGT 格网 · " + ("尺寸有效" if elevation_valid else "需要校验")},
                 {"id": "encyclopedia", "name": "离线百科", "icon": "book-open", "bytes": encyclopedia_usage_value["bytes"], "files": encyclopedia_usage_value["files"], "status": "ready" if encyclopedia_state["valid"] and services_available["encyclopedia"] else ("warning" if encyclopedia_manifest else "missing"), "subtitle": f"中文维基百科 {encyclopedia_manifest.get('snapshot', '--')} · " + ("清单有效，服务在线" if encyclopedia_state["valid"] and services_available["encyclopedia"] else "资源或服务需检查")},
                 {"id": "overview-map", "name": "全球概览地图", "icon": "globe-2", "bytes": overview_usage["bytes"], "files": overview_usage["files"], "status": "ready" if overview_valid else ("warning" if overview_usage["files"] else "missing"), "subtitle": f"{overview_manifest.get('snapshot', 'Natural Earth')} · " + ("校验通过" if overview_valid else "需要校验")},
+                {"id": "osm-carto-renderer", "name": "本地 OSM 原版渲染", "icon": "map", "bytes": osm_carto_database_bytes + osm_carto_cache_usage["bytes"], "files": osm_carto_cache_usage["files"] + (1 if osm_carto_manifest else 0), "status": "ready" if osm_carto_manifest and services_available["osm-carto"] else ("warning" if osm_carto_manifest else "missing"), "subtitle": "江苏、安徽 · OpenStreetMap Carto · " + ("服务在线" if services_available["osm-carto"] else "等待导入或启动")},
                 {"id": "weather", "name": "天气快照", "icon": "cloud-sun", "bytes": weather_usage["bytes"], "files": weather_usage["files"], "status": "ready" if weather_state["valid"] else ("warning" if weather_manifest else "missing"), "subtitle": f"Open-Meteo · {weather_manifest.get('generatedAt', '--')} · " + ("校验通过" if weather_state["valid"] else "需要校验")},
                 {"id": "travel-guide", "name": "旅行指南", "icon": "landmark", "bytes": travel_usage_value["bytes"], "files": travel_usage_value["files"], "status": "ready" if travel_state["valid"] and services_available["encyclopedia"] else ("warning" if travel_manifest else "missing"), "subtitle": f"中文维基导游 {travel_manifest.get('snapshot', '--')} · " + ("清单有效，服务在线" if travel_state["valid"] and services_available["encyclopedia"] else "资源或服务需检查")},
-                {"id": "nautical", "name": "航海参考", "icon": "anchor", "bytes": nautical_usage["bytes"], "files": nautical_usage["files"], "status": "ready" if nautical_state["valid"] else ("warning" if nautical_manifest else "missing"), "subtitle": f"{nautical_manifest.get('features', 0)} 个本地 OSM 航海地物 · " + ("校验通过" if nautical_state["valid"] else "需要校验")},
+                {"id": "nautical", "name": "航海参考", "icon": "anchor", "bytes": nautical_usage["bytes"], "files": nautical_usage["files"], "status": "ready" if nautical_state["valid"] else ("warning" if nautical_manifest else "missing"), "subtitle": f"{len(nautical_source_hashes)} 个区域 · {nautical_manifest.get('features', 0)} 个本地 OSM 航海地物 · " + ("校验通过" if nautical_state["valid"] else "需要校验")},
                 {"id": "tts", "name": "语音提示（TTS）", "icon": "volume-2", "bytes": 0, "files": 0, "status": "external", "subtitle": "Windows/浏览器运行时能力 · 不计入离线资源占用"},
             ],
         },
@@ -1960,6 +2228,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     for group in local_groups:
         for item in group["items"]:
             item.update(RESOURCE_CLASSIFICATIONS.get(str(item["id"]), {}))
+            item.update(RESOURCE_MANAGEMENT.get(str(item["id"]), {
+                "managementMode": "system",
+                "managementLabel": "系统托管",
+            }))
 
     update_checks = [
         {
@@ -1969,11 +2241,12 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": int(pack["bytes"] or 0),
             "installedVersion": pack.get("sourceUpdatedAt"),
             "availableVersion": pack.get("upstreamSourceUpdatedAt") or pack.get("currentSourceUpdatedAt") or current_state.get("timestamp"),
-            "updateAvailable": bool(pack["updateAvailable"]),
-            "statusKind": pack.get("updateStatus", "unknown"),
-            "reason": "上游快照序列已变化" if pack.get("updateAvailable") else (
-                pack.get("updateError") or ("已与最近上游检查一致" if pack.get("updateStatus") == "current" else "尚未检查上游")
-            ),
+            "updateAvailable": bool(pack["updateAvailable"] or not pack["sizeMatches"]),
+            "statusKind": "repair" if not pack["sizeMatches"] else pack.get("updateStatus", "unknown"),
+            "reason": ("丰富地图详情包缺失或校验不一致，需要重新生成" if not pack.get("richDetailsReady") else "本地地图文件与清单尺寸不一致，需要重新生成") if not pack["sizeMatches"] else ("上游快照序列已变化" if pack.get("updateAvailable") else (
+                pack.get("updateError") or ("已与最近上游检查一致" if pack.get("updateStatus") == "current" else "本地序列较新或尚无法安全比较上游")
+            )),
+            "action": "update" if pack.get("updateAvailable") else "rebuild" if not pack["sizeMatches"] else None,
             "lastCheckedAt": pack.get("lastCheckedAt"),
             "sourceUpdatedAt": pack.get("sourceUpdatedAt"),
             "builtAt": pack.get("generatedAt"),
@@ -2020,7 +2293,6 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         except OSError:
             return True
 
-    capability_product_hash = str(capability.get("product", {}).get("sha256", ""))
     static_updates = [
         {
             "id": "world-region-catalog",
@@ -2042,9 +2314,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": overview_usage["bytes"],
             "installedVersion": overview_manifest.get("generatedAt"),
             "availableVersion": overview_manifest.get("generatedAt"),
-            "updateAvailable": not bool(overview_manifest),
-            "statusKind": "missing" if not overview_manifest else "current",
-            "reason": "资源尚未安装" if not overview_manifest else "资源已安装",
+            "updateAvailable": not overview_valid,
+            "statusKind": "missing" if not overview_manifest else "repair" if not overview_valid else "current",
+            "reason": "资源尚未安装" if not overview_manifest else "资源文件或清单校验失败，需要修复" if not overview_valid else "资源已安装并通过校验",
+            "action": "update" if not overview_valid else None,
             "heavy": False,
             "command": "D:\\GISS\\sync-overview-resources.cmd",
         },
@@ -2055,9 +2328,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": weather_usage["bytes"],
             "installedVersion": weather_manifest.get("generatedAt"),
             "availableVersion": datetime.now().astimezone().isoformat(),
-            "updateAvailable": manifest_is_older_than(weather_manifest, 6),
-            "statusKind": "refresh" if manifest_is_older_than(weather_manifest, 6) else "current",
-            "reason": "天气快照已到刷新时间" if manifest_is_older_than(weather_manifest, 6) else "天气快照仍在有效期内",
+            "updateAvailable": not weather_state["valid"] or manifest_is_older_than(weather_manifest, 6),
+            "statusKind": "missing" if not weather_manifest else "repair" if not weather_state["valid"] else "refresh" if manifest_is_older_than(weather_manifest, 6) else "current",
+            "reason": "天气资源尚未安装" if not weather_manifest else "天气资源校验失败，需要重新获取" if not weather_state["valid"] else "天气快照已到刷新时间" if manifest_is_older_than(weather_manifest, 6) else "天气快照仍在有效期内",
+            "action": "update" if not weather_state["valid"] or manifest_is_older_than(weather_manifest, 6) else None,
             "heavy": False,
             "command": "D:\\GISS\\sync-weather.cmd",
         },
@@ -2068,9 +2342,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": nautical_usage["bytes"],
             "installedVersion": nautical_manifest.get("generatedAt"),
             "availableVersion": capability.get("generatedAt"),
-            "updateAvailable": not bool(nautical_manifest) or str(nautical_manifest.get("sourceSha256", "")) != capability_product_hash,
-            "statusKind": "rebuild" if not bool(nautical_manifest) or str(nautical_manifest.get("sourceSha256", "")) != capability_product_hash else "current",
-            "reason": "共享 OSM 输入已变化，需要重建" if not bool(nautical_manifest) or str(nautical_manifest.get("sourceSha256", "")) != capability_product_hash else "航海参考与共享输入一致",
+            "updateAvailable": not nautical_state["valid"] or not nautical_inputs_current,
+            "statusKind": "repair" if nautical_manifest and not nautical_state["valid"] else "rebuild" if not bool(nautical_manifest) or not nautical_inputs_current else "current",
+            "reason": "航海资源校验失败，需要重建" if nautical_manifest and not nautical_state["valid"] else "已启用地图包集合或源数据摘要已变化，需要增量重建" if not bool(nautical_manifest) or not nautical_inputs_current else "航海参考与已启用地图包来源一致",
+            "action": "update" if not nautical_state["valid"] or not nautical_inputs_current else None,
             "heavy": False,
             "command": "D:\\GISS\\build-nautical.cmd",
         },
@@ -2081,9 +2356,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": int(encyclopedia_manifest.get("bytes", 0) or 0),
             "installedVersion": encyclopedia_manifest.get("generatedAt"),
             "availableVersion": encyclopedia_manifest.get("generatedAt"),
-            "updateAvailable": not bool(encyclopedia_manifest),
-            "statusKind": "missing" if not encyclopedia_manifest else "current",
-            "reason": "资源尚未安装" if not encyclopedia_manifest else "本地归档已安装；新版本需显式检查上游",
+            "updateAvailable": not encyclopedia_state["valid"],
+            "statusKind": "missing" if not encyclopedia_manifest else "repair" if not encyclopedia_state["valid"] else "current",
+            "reason": "资源尚未安装" if not encyclopedia_manifest else "本地归档校验失败，需要重新获取" if not encyclopedia_state["valid"] else "本地归档已安装；新版本需显式检查上游",
+            "action": "update" if not encyclopedia_state["valid"] else None,
             "heavy": True,
             "command": "D:\\GISS\\download-encyclopedia.cmd",
         },
@@ -2094,9 +2370,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "bytes": int(travel_manifest.get("bytes", 0) or 0),
             "installedVersion": travel_manifest.get("generatedAt"),
             "availableVersion": travel_manifest.get("generatedAt"),
-            "updateAvailable": not bool(travel_manifest),
-            "statusKind": "missing" if not travel_manifest else "current",
-            "reason": "资源尚未安装" if not travel_manifest else "本地归档已安装；新版本需显式检查上游",
+            "updateAvailable": not travel_state["valid"],
+            "statusKind": "missing" if not travel_manifest else "repair" if not travel_state["valid"] else "current",
+            "reason": "资源尚未安装" if not travel_manifest else "本地归档校验失败，需要重新获取" if not travel_state["valid"] else "本地归档已安装；新版本需显式检查上游",
+            "action": "update" if not travel_state["valid"] else None,
             "heavy": True,
             "command": "D:\\GISS\\download-travel-guide.cmd",
         },
@@ -2142,10 +2419,11 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     )
 
     legacy_packages = legacy_map_packages(catalog, packs)
-    caches = cache_inventory()
+    caches = cache_inventory({"terrain-tiles": terrain_cache_usage, "build-temp": build_cache_usage})
 
     payload = {
         "generatedAt": datetime.now().astimezone().isoformat(),
+        "resourceRevision": inventory_revision,
         "catalogVersion": catalog.get("version"),
         "storage": {
             "diskTotalBytes": disk.total,
@@ -2184,13 +2462,16 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         "upstream": {"checkedAt": upstream_cache.get("checkedAt"), "refreshed": check_upstream},
         "cache": {"state": "fresh", "cachedAt": None},
     }
-    write_json_file(RESOURCE_INVENTORY_CACHE_PATH, payload)
+    if resource_inventory_revision() == inventory_revision:
+        write_json_file(RESOURCE_INVENTORY_CACHE_PATH, payload)
     return payload
 
 
 def refresh_resource_inventory(check_upstream: bool = False) -> None:
     try:
-        build_resource_inventory(check_upstream=check_upstream)
+        payload = build_resource_inventory(check_upstream=check_upstream)
+        if payload.get("resourceRevision") != resource_inventory_revision():
+            build_resource_inventory(check_upstream=check_upstream)
     finally:
         RESOURCE_INVENTORY_REFRESH_LOCK.release()
 
@@ -2214,13 +2495,51 @@ def resource_inventory(
 ) -> dict[str, Any]:
     stored = read_json_file(RESOURCE_INVENTORY_CACHE_PATH)
     if stored:
-        if not cached or check_upstream:
+        stale = stored.get("resourceRevision") != resource_inventory_revision()
+        if stale or not cached or check_upstream:
             schedule_resource_inventory_refresh(check_upstream)
-        state = "refreshing" if (not cached or check_upstream or RESOURCE_INVENTORY_REFRESH_LOCK.locked()) else "cached"
+        state = "stale-refreshing" if stale else "refreshing" if (not cached or check_upstream or RESOURCE_INVENTORY_REFRESH_LOCK.locked()) else "cached"
+        if stale:
+            installed = installed_map_pack_states(map_catalog())
+            installed_ids = {str(pack["id"]) for pack in installed}
+            checks = [
+                item for item in stored.get("updateChecks", [])
+                if item.get("type") != "standard-map" or str(item.get("id")) in installed_ids
+            ]
+            summary = {
+                **stored.get("summary", {}),
+                "installedPacks": len(installed),
+                "enabledPacks": sum(1 for pack in installed if pack["enabled"]),
+                "disabledPacks": sum(1 for pack in installed if not pack["enabled"]),
+                "updates": sum(1 for item in checks if item.get("updateAvailable")),
+            }
+            return {**stored, "summary": summary, "updateChecks": checks, "cache": {"state": state, "cachedAt": stored.get("generatedAt")}}
         return {**stored, "cache": {"state": state, "cachedAt": stored.get("generatedAt")}}
-    if cached and not check_upstream:
-        raise HTTPException(status_code=404, detail="Resource inventory cache is not ready")
-    return build_resource_inventory(check_upstream=check_upstream)
+
+    schedule_resource_inventory_refresh(check_upstream)
+    catalog = map_catalog()
+    installed = installed_map_pack_states(catalog)
+    disk = shutil.disk_usage(MEDIA_ROOT)
+    return {
+        "generatedAt": None,
+        "resourceRevision": resource_inventory_revision(),
+        "storage": {
+            "diskTotalBytes": disk.total, "diskUsedBytes": disk.used, "diskFreeBytes": disk.free,
+            "managedBytes": None, "externalBytesKnown": False,
+        },
+        "summary": {
+            "installedPacks": len(installed),
+            "enabledPacks": sum(1 for pack in installed if pack["enabled"]),
+            "disabledPacks": sum(1 for pack in installed if not pack["enabled"]),
+            "availablePacks": len(catalog["datasets"]) - len(installed),
+            "mapPackCount": len(catalog["datasets"]),
+            "provinceCount": sum(1 for item in catalog["datasets"] if item.get("kind") == "province"),
+            "independentProvinces": sum(1 for pack in installed if pack.get("kind") == "province"),
+            "updates": 0,
+        },
+        "localGroups": [], "caches": [], "legacyPackages": [], "updateChecks": [],
+        "cache": {"state": "building", "cachedAt": None},
+    }
 
 
 @app.get("/maintenance")
@@ -2243,11 +2562,14 @@ def create_maintenance_job(payload: MaintenanceJobInput) -> dict[str, Any]:
     resource_id = payload.resourceId
     action = payload.action
     catalog = map_catalog()
-    packs = {str(pack["id"]): pack for pack in map_pack_states(catalog)}
+    pack = map_pack_state_for_id(catalog, resource_id)
 
-    if resource_id in packs:
-        pack = packs[resource_id]
-        if action in {"update", "rebuild", "rollback", "verify", "remove"} and not pack["installed"]:
+    if pack is not None:
+        if action == "build" and pack["installed"]:
+            raise HTTPException(status_code=409, detail="Map pack is already installed; use rebuild instead")
+        if action == "remove" and not pack.get("hasLocalArtifacts"):
+            raise HTTPException(status_code=409, detail="Map pack is already absent")
+        if action not in {"build", "remove"} and not pack["installed"]:
             raise HTTPException(status_code=409, detail="Map pack is not installed")
         if action in {"rollback", "verify"}:
             worker = maintenance_worker_state()
@@ -2264,12 +2586,15 @@ def create_maintenance_job(payload: MaintenanceJobInput) -> dict[str, Any]:
             remote_sequence = str(remote.get("sequenceNumber") or "")
             installed_sequence = str(pack.get("sourceSequence") or "")
             local_snapshot_sequence = str(pack.get("currentSourceSequence") or "")
+            remote_relation = source_sequence_relation(remote_sequence, installed_sequence)
             is_current = (
-                bool(remote_sequence and installed_sequence and remote_sequence == installed_sequence)
+                bool(remote_relation is not None and remote_relation <= 0)
                 or bool(not remote_sequence and installed_sequence and local_snapshot_sequence == installed_sequence)
             )
             if is_current:
-                raise HTTPException(status_code=409, detail="地图包已经是最新版本；如需重新生成，请使用“重建”")
+                raise HTTPException(status_code=409, detail="上游序列不比本地版本新；如需重新生成，请使用“重建”")
+            if remote_sequence and installed_sequence and remote_relation is None:
+                raise HTTPException(status_code=409, detail="无法安全比较上游与本地序列，请重新检查上游状态")
         if action == "remove" and payload.confirmToken != resource_id:
             raise HTTPException(status_code=409, detail="Protected removal requires the map pack id as confirmation")
         label = f"{pack.get('shortName') or pack.get('name')}地图包"
@@ -2284,8 +2609,11 @@ def create_maintenance_job(payload: MaintenanceJobInput) -> dict[str, Any]:
         heavy = bool(specification["heavy"])
 
     for existing in maintenance_jobs():
-        if existing.get("resourceId") == resource_id and existing.get("action") == action and existing.get("status") in {"queued", "running"}:
+        if existing.get("resourceId") != resource_id or existing.get("status") not in {"queued", "running"}:
+            continue
+        if existing.get("action") == action:
             return existing
+        raise HTTPException(status_code=409, detail="该资源已有其他维护任务，完成或取消后才能执行新操作")
 
     now = datetime.now().astimezone().isoformat()
     job_id = uuid.uuid4().hex
@@ -2341,14 +2669,13 @@ def retry_maintenance_job(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Maintenance job not found")
     if job.get("status") not in {"failed", "cancelled"}:
         raise HTTPException(status_code=409, detail="Only failed or cancelled jobs can be retried")
-    now = datetime.now().astimezone().isoformat()
-    job.update({
-        "status": "queued", "message": "任务已重新加入队列", "requestedAt": now,
-        "startedAt": None, "finishedAt": None, "exitCode": None,
-        "attempts": 0, "nextAttemptAt": now, "cancelRequested": False,
-    })
-    write_json_file(path, job)
-    return job
+    resource_id = str(job.get("resourceId") or "")
+    action = str(job.get("action") or "")
+    return create_maintenance_job(MaintenanceJobInput(
+        resourceId=resource_id,
+        action=action,
+        confirmToken=resource_id if action == "remove" else None,
+    ))
 
 
 @app.post("/map-packs/{pack_id}/verify", status_code=202)

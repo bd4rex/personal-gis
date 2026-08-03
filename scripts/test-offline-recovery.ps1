@@ -373,15 +373,22 @@ try {
   $pmtilesHeaders = [ordered]@{}
   foreach ($pack in $installedPacks) {
     $pmtiles = Join-Path $tileRoot ([IO.Path]::GetFileName([string]$pack.url))
-    $stream = [IO.File]::OpenRead($pmtiles)
-    try {
-      $headerBytes = New-Object byte[] 7
-      $read = $stream.Read($headerBytes, 0, 7)
+    $manifest = Get-Content -Raw -LiteralPath (Join-Path $tileRoot ([IO.Path]::GetFileName([string]$pack.manifestUrl))) | ConvertFrom-Json
+    $details = if ($manifest.details.file) { Join-Path $tileRoot ([IO.Path]::GetFileName([string]$manifest.details.file)) } else { $null }
+    if (-not $details -or -not (Test-Path -LiteralPath $details -PathType Leaf)) {
+      throw "Rich-detail PMTiles is missing from the recovery kit for $($pack.id)."
     }
-    finally { $stream.Dispose() }
-    $pmtilesHeader = [Text.Encoding]::ASCII.GetString($headerBytes, 0, $read)
-    if ($pmtilesHeader -ne "PMTiles") { throw "PMTiles archive header is invalid for $($pack.id)." }
-    $pmtilesHeaders[$pack.id] = $pmtilesHeader
+    foreach ($archive in @($pmtiles, $details)) {
+      $stream = [IO.File]::OpenRead($archive)
+      try {
+        $headerBytes = New-Object byte[] 7
+        $read = $stream.Read($headerBytes, 0, 7)
+      }
+      finally { $stream.Dispose() }
+      $pmtilesHeader = [Text.Encoding]::ASCII.GetString($headerBytes, 0, $read)
+      if ($pmtilesHeader -ne "PMTiles") { throw "PMTiles archive header is invalid: $archive" }
+    }
+    $pmtilesHeaders[$pack.id] = "PMTiles+details"
   }
 
   docker exec $api python -c "import socket,sys; s=socket.socket(); s.settimeout(2); r=s.connect_ex(('1.1.1.1',443)); s.close(); sys.exit(0 if r != 0 else 1)" *> $null

@@ -1,5 +1,5 @@
 param(
-  [int]$Keep = 2,
+  [int]$Keep = 1,
   [switch]$KeepFailed
 )
 
@@ -11,8 +11,17 @@ if (-not (Test-Path -LiteralPath $kitRoot -PathType Container)) { exit 0 }
 $resolvedRoot = (Resolve-Path -LiteralPath $kitRoot).Path.TrimEnd('\')
 $directories = @(Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force)
 $valid = @($directories | Where-Object {
-  -not $_.Name.EndsWith(".failed", [StringComparison]::OrdinalIgnoreCase) -and
-  (Test-Path -LiteralPath (Join-Path $_.FullName "manifest.json") -PathType Leaf)
+  if ($_.Name.EndsWith(".failed", [StringComparison]::OrdinalIgnoreCase)) { return $false }
+  $manifestPath = Join-Path $_.FullName "manifest.json"
+  $verificationPath = Join-Path $_.FullName "verification.json"
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $verificationPath -PathType Leaf)) { return $false }
+  try {
+    $verification = Get-Content -Raw -LiteralPath $verificationPath | ConvertFrom-Json
+    return $verification.status -eq "verified" -and
+      $verification.manifestSha256 -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
+  }
+  catch { return $false }
 } | Sort-Object Name -Descending)
 
 if ($valid.Count -lt 1) { throw "Refusing to prune offline kits because no verified kit was found." }

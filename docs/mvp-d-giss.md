@@ -25,7 +25,8 @@ http://localhost:8080/
 
 | 层 | 当前实现 | 是否可替换 |
 | --- | --- | --- |
-| 参考底图 | OSM -> Osmium -> Planetiler -> `suwan.pmtiles` | 可重建，不影响个人数据 |
+| 参考底图 | OSM -> Osmium -> osm2pgsql/PostGIS -> OpenStreetMap Carto/Mapnik | 接近 OSM 官网表现，可重建，不影响个人数据 |
+| 交互备选底图 | OSM -> Planetiler -> 省级 PMTiles | 轻量、可移植，可点击地物属性 |
 | 个人数据 | FastAPI -> PostGIS，照片按 SHA256 存储 | 长期保留，是系统核心资产 |
 | 浏览界面 | MapLibre + 本地样式、字体、图标 | 可持续改进或更换客户端 |
 | 高级参考 | Nominatim + Valhalla + HGT + Kiwix | 均位于稳定本地接口之后 |
@@ -33,7 +34,7 @@ http://localhost:8080/
 ## 当前能力
 
 - 苏皖、沪浙两个可校验矢量区域包，实际生成到 `z16`，MapLibre 可继续放大到 `z18`；
-- 标准/探索两套 OSM-like 配色；
+- 默认使用 OSM 原版离线表现；合并后的交互矢量备选保留兴趣点属性与地物收藏交互；
 - 地形、水系、用地、道路、铁路、建筑、行政边界、地名、道路名、POI 与图例；
 - 添加、编辑、删除个人点位；
 - 导入 GPX、查看和删除轨迹；

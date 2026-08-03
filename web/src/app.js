@@ -1,6 +1,13 @@
 import { escapeHtml, formatBytes, formatDate, formatEstimateRange } from "./format.js";
 
 const savedOnlineMapProvider = localStorage.getItem("giss-online-provider") === "openfreemap" ? "openfreemap" : "osm";
+const previousMapTheme = localStorage.getItem("giss-theme");
+const mapStyleSchema = "osm-carto-2";
+if (localStorage.getItem("giss-map-style-schema") !== mapStyleSchema) {
+  localStorage.setItem("giss-map-style-schema", mapStyleSchema);
+  localStorage.setItem("giss-theme", ["standard", "explore", "vector"].includes(previousMapTheme) ? "vector" : "osm-carto");
+}
+const savedMapTheme = localStorage.getItem("giss-theme");
 
 const state = {
   catalog: null,
@@ -52,7 +59,7 @@ const state = {
     nautical: false,
     emergency: false
   },
-  theme: localStorage.getItem("giss-theme") === "explore" ? "explore" : "standard",
+  theme: ["vector", "osm-carto"].includes(savedMapTheme) ? savedMapTheme : "osm-carto",
   mode: null,
   measureCoordinates: [],
   listFilter: "all",
@@ -93,7 +100,7 @@ function cacheElements() {
     "dataVersion", "activePackName", "packSummary", "regionPackList", "availablePackSummary",
     "availablePacksButton", "resourceManagerDialog", "resourceManagerSubtitle", "resourceRefreshButton",
     "resourceDownloadBadge", "resourceLocalBadge", "resourceUpdatesBadge", "resourceDiskFree",
-    "resourceDiskUsedBar", "resourceDiskUsed", "resourceManagedSize", "resourceSearchWrap",
+    "resourceStorageTrack", "resourceDiskUsedBar", "resourceManagedUsedBar", "resourceDiskUsed", "resourceManagedSize", "resourceSearchWrap",
     "resourceSearchInput", "resourceManagerBody", "resourceRegionBrowser", "resourceRegionList",
     "resourceManagerContent", "viewSwitcher", "mapShortcuts",
     "contourShortcut", "legendShortcut", "legendPopover", "legendCloseButton", "onlineMapShortcut",
@@ -909,12 +916,13 @@ function renderResourceUpdateRow(item, actionable) {
   const icons = { "standard-map": "map", "capability-index": "route", catalog: "list-tree", "overview-map": "globe-2", weather: "cloud-sun", nautical: "anchor", encyclopedia: "book-open", "travel-guide": "landmark" };
   const pack = item.type === "standard-map" ? state.mapPacks.find((candidate) => candidate.id === item.id) : null;
   const displayName = pack ? resourcePackName(pack) : item.name;
-  const job = maintenanceJobFor(item.id, "update");
-  const latestJob = latestMaintenanceJobFor(item.id, "update");
+  const maintenanceAction = item.action || "update";
+  const job = maintenanceJobFor(item.id, maintenanceAction);
+  const latestJob = latestMaintenanceJobFor(item.id, maintenanceAction);
   const retryableJob = !job && ["failed", "cancelled"].includes(latestJob?.status) ? latestJob : null;
   const rowState = job?.status || retryableJob?.status || "";
-  const statusLabels = { upstream: "上游有新数据", rebuild: "需要重建", refresh: "到期刷新", missing: "需要安装", unknown: "未检查", current: "最新" };
-  const actionLabel = item.statusKind === "rebuild" || item.heavy ? "重建" : item.statusKind === "missing" ? "安装" : "更新";
+  const statusLabels = { upstream: "上游有新数据", rebuild: "需要重建", repair: "需要修复", refresh: "到期刷新", missing: "需要安装", unknown: "未检查", current: "最新", "local-newer": "本地较新" };
+  const actionLabel = maintenanceAction === "rebuild" || item.statusKind === "rebuild" || item.heavy ? "重建" : item.statusKind === "missing" ? "安装" : item.statusKind === "repair" ? "修复" : "更新";
   const timeline = [
     ["源数据", item.sourceUpdatedAt || item.availableVersion],
     ["本地构建", item.builtAt || item.installedVersion],
@@ -932,7 +940,7 @@ function renderResourceUpdateRow(item, actionable) {
     : retryableJob && actionable
       ? `<button class="command-button resource-task-action" type="button" data-maintenance-retry="${escapeHtml(retryableJob.id)}" title="重试${escapeHtml(displayName)}维护任务"><i data-lucide="rotate-ccw"></i><span>重试</span></button>`
       : actionable
-        ? `<button class="command-button" type="button" data-resource-update-now="${escapeHtml(item.id)}" ${!state.maintenance?.worker?.online ? "disabled" : ""}><i data-lucide="${item.heavy ? "database-zap" : "refresh-cw"}"></i><span>${actionLabel}</span></button>`
+        ? `<button class="command-button" type="button" data-resource-update-now="${escapeHtml(item.id)}" data-resource-update-action="${escapeHtml(maintenanceAction)}" ${!state.maintenance?.worker?.online ? "disabled" : ""}><i data-lucide="${maintenanceAction === "rebuild" ? "hammer" : item.heavy ? "database-zap" : "refresh-cw"}"></i><span>${actionLabel}</span></button>`
         : `<span class="resource-row-status ${item.updateAvailable ? "update" : "ready"}">${statusLabels[item.statusKind] || "最新"}</span>`;
   return `<div class="resource-update-row ${job || retryableJob ? "has-job" : ""} ${escapeHtml(rowState)}" data-resource-update="${escapeHtml(item.id)}">
     <span class="resource-row-icon"><i data-lucide="${icons[item.type] || "refresh-cw"}"></i></span>
@@ -960,10 +968,13 @@ function renderResourceManager() {
   elements.resourceUpdatesBadge.textContent = summary?.updates ?? ((state.maintenance?.jobs || []).filter((job) => ["queued", "running"].includes(job.status)).length || "--");
   if (storage) {
     const usedPercent = Number(storage.diskTotalBytes) > 0 ? Number(storage.diskUsedBytes) / Number(storage.diskTotalBytes) * 100 : 0;
+    const managedPercent = Number(storage.diskTotalBytes) > 0 ? Number(storage.managedBytes) / Number(storage.diskTotalBytes) * 100 : 0;
     elements.resourceDiskFree.textContent = `${formatBytes(Number(storage.diskFreeBytes))} 可用`;
     elements.resourceDiskUsed.textContent = `磁盘已用 ${formatBytes(Number(storage.diskUsedBytes))}`;
-    elements.resourceManagedSize.textContent = `GIS_P 可计量 ${formatBytes(Number(storage.managedBytes))}`;
+    elements.resourceManagedSize.textContent = `GIS_P 占用 ${formatBytes(Number(storage.managedBytes))}`;
     elements.resourceDiskUsedBar.style.width = `${Math.max(0, Math.min(100, usedPercent)).toFixed(1)}%`;
+    elements.resourceManagedUsedBar.style.width = `${Math.max(0, Math.min(100, managedPercent)).toFixed(1)}%`;
+    elements.resourceStorageTrack.setAttribute("aria-label", `磁盘已用 ${formatBytes(Number(storage.diskUsedBytes))}，其中 GIS_P 占用 ${formatBytes(Number(storage.managedBytes))}`);
   }
   if (!state.resourceInventory && state.resourceTab === "download" && state.resourceCatalog && state.mapPacks.length) {
     elements.resourceManagerContent.innerHTML = renderResourceDownload();
@@ -985,7 +996,7 @@ function renderResourceManager() {
   elements.resourceRefreshButton.classList.toggle("loading", state.resourceLoading);
   elements.resourceRefreshButton.disabled = state.resourceLoading;
   elements.resourceManagerSubtitle.textContent = state.resourceInventory
-    ? `离线资源目录 · ${formatBytes(Number(state.resourceInventory.storage.managedBytes))} 可计量${state.resourceInventory.cache?.state === "cached" ? " · 后台刷新中" : ""}`
+    ? `离线资源目录 · GIS_P 占用 ${formatBytes(Number(state.resourceInventory.storage.managedBytes))}${state.resourceInventory.cache?.state === "cached" ? " · 后台刷新中" : ""}`
     : "离线资源目录与本地存储";
   icons();
 }
@@ -1068,7 +1079,7 @@ async function queueRegularUpdates() {
   try {
     await Promise.all(updates.map((item) => api("/maintenance/jobs", {
       method: "POST",
-      body: JSON.stringify({ resourceId: item.id, action: "update" })
+      body: JSON.stringify({ resourceId: item.id, action: item.action || "update" })
     })));
     showToast(`${updates.length} 个常规更新已加入队列`);
     await loadMaintenanceStatus(true);
@@ -1259,7 +1270,10 @@ async function runResourceBulkAction(action) {
       showToast("所选地图包均为最新状态");
       return;
     }
-    for (const id of updateIds) await queueMaintenanceJob(id, "update");
+    for (const id of updateIds) {
+      const check = state.resourceInventory?.updateChecks?.find((item) => item.id === id);
+      await queueMaintenanceJob(id, check?.action || "update");
+    }
     showToast(`${updateIds.length} 个地图包更新已加入队列`);
   }
 }
@@ -1300,18 +1314,19 @@ function setStatusTone(element, tone = "") {
 
 function baseFeatureName(feature) {
   const properties = feature?.properties || {};
-  return properties["name:zh"] || properties.name || properties.name_en || properties["name:latin"] || "";
+  return properties.name_zh || properties["name:zh"] || properties.name || properties.name_en || properties["name:latin"] || "";
 }
 
 function baseFeatureCategory(feature) {
   const properties = feature?.properties || {};
   const sourceLayer = feature?.layer?.["source-layer"] || "";
   const labels = {
-    poi: "兴趣点", place: "地名", mountain_peak: "山峰", transportation_name: "道路",
+    poi: "兴趣点", poi_detail: "兴趣点", place: "地名", mountain_peak: "山峰",
+    aerodrome_label: "机场", transportation_name: "道路",
     water_name: "水体", waterway: "水系", park: "公园与绿地", building: "建筑"
   };
   const kind = labels[sourceLayer] || "地图地物";
-  return [kind, properties.class, properties.subclass].filter(Boolean).join(" · ");
+  return [kind, properties.class || properties.category, properties.subclass].filter(Boolean).join(" · ");
 }
 
 function selectableBaseFeature(point) {
@@ -1323,7 +1338,8 @@ function selectableBaseFeature(point) {
     return null;
   }
   const allowed = new Set([
-    "poi", "place", "mountain_peak", "transportation_name", "water_name", "waterway", "park", "building"
+    "poi", "poi_detail", "place", "mountain_peak", "aerodrome_label",
+    "transportation_name", "water_name", "waterway", "park", "building"
   ]);
   return features.find((feature) => allowed.has(feature.layer?.["source-layer"])) || null;
 }
@@ -1331,21 +1347,29 @@ function selectableBaseFeature(point) {
 function detailRows(feature, reference = null) {
   const properties = feature?.properties || {};
   const tags = reference?.details?.tags || {};
-  const address = tags["addr:full"] || [
+  const address = properties.addr_full || [
+    properties.addr_province, properties.addr_city, properties.addr_district,
+    properties.addr_street, properties.addr_housenumber
+  ].filter(Boolean).join("") || tags["addr:full"] || [
     tags["addr:province"], tags["addr:city"], tags["addr:district"],
     tags["addr:street"], tags["addr:housenumber"]
   ].filter(Boolean).join("");
   return [
-    ["分类", properties.class || reference?.category],
+    ["分类", properties.class || properties.category || reference?.category],
     ["类型", properties.subclass || reference?.subtype],
     ["地址", address],
-    ["品牌", tags.brand],
-    ["运营方", tags.operator],
-    ["开放时间", tags.opening_hours],
-    ["电话", tags.phone || tags["contact:phone"]],
-    ["网站", tags.website || tags["contact:website"]],
+    ["品牌", properties.brand || tags.brand],
+    ["运营方", properties.operator || tags.operator],
+    ["开放时间", properties.opening_hours || tags.opening_hours],
+    ["电话", properties.phone || tags.phone || tags["contact:phone"]],
+    ["网站", properties.website || tags.website || tags["contact:website"]],
+    ["餐饮类型", properties.cuisine || tags.cuisine],
+    ["无障碍", properties.wheelchair || tags.wheelchair],
+    ["费用", properties.fee || tags.fee],
+    ["通行", properties.access || tags.access],
     ["道路编号", properties.ref || tags.ref],
     ["海拔", tags.ele || properties.ele],
+    ["说明", properties.description || tags.description],
     ["附近距离", reference?.details?.distance_m ? `${reference.details.distance_m} m` : ""]
   ].filter(([, value]) => value !== undefined && value !== null && String(value).trim());
 }
@@ -2427,7 +2451,7 @@ function useResourceAction(action) {
     elements.resourceManagerDialog.close();
     setSidePanelCollapsed(false);
     document.querySelector('[data-tab="layers"]')?.click();
-    showToast("可在图层面板切换标准与探索风格");
+    showToast("可在图层面板切换矢量样式与本地 OSM 原版");
     return;
   } else if (action === "search") {
     elements.resourceManagerDialog.close();
@@ -2466,7 +2490,7 @@ function addOfflineReferenceLayers() {
     map.setPaintProperty("background", "background-color", [
       "interpolate", ["linear"], ["zoom"],
       5.4, "#a9cfda",
-      6.2, state.theme === "explore" ? "#f4f1e8" : "#f2efe9"
+      6.2, "#f4f1e8"
     ]);
   }
   map.addSource("world-overview", {
@@ -2486,6 +2510,25 @@ function addOfflineReferenceLayers() {
       "raster-brightness-max": 0.92
     }
   });
+  const localOsmCarto = state.resourceCatalog?.localMaps?.osmCarto;
+  if (localOsmCarto?.tiles?.length) {
+    map.addSource("local-osm-carto", {
+      type: "raster",
+      tiles: localOsmCarto.tiles,
+      tileSize: Number(localOsmCarto.tileSize) || 256,
+      minzoom: Number(localOsmCarto.minZoom) || 0,
+      maxzoom: Number(localOsmCarto.maxZoom) || 20,
+      bounds: localOsmCarto.bounds,
+      attribution: `<a href="${escapeHtml(localOsmCarto.copyrightUrl || "https://www.openstreetmap.org/copyright")}" target="_blank" rel="noreferrer">${escapeHtml(localOsmCarto.attribution || "© OpenStreetMap contributors · OpenStreetMap Carto")}</a>`
+    });
+    map.addLayer({
+      id: "local-osm-carto-raster",
+      type: "raster",
+      source: "local-osm-carto",
+      layout: { visibility: state.theme === "osm-carto" ? "visible" : "none" },
+      paint: { "raster-opacity": 1, "raster-fade-duration": 0 }
+    });
+  }
   const onlineMap = state.resourceCatalog?.onlineMaps?.osmStandard;
   if (onlineMap?.tiles?.length) {
     map.addSource("online-osm", {
@@ -2617,6 +2660,11 @@ function addOfflineReferenceLayers() {
 
   if (map.getLayer("online-osm-raster") && map.getLayer("weather-point")) {
     map.moveLayer("online-osm-raster", "weather-point");
+  }
+  if (map.getLayer("local-osm-carto-raster")) {
+    const onlineLayer = state.onlineVectorLayerIds.find((layerId) => map.getLayer(layerId))
+      || (map.getLayer("online-osm-raster") ? "online-osm-raster" : null);
+    map.moveLayer("local-osm-carto-raster", onlineLayer || "weather-point");
   }
   ["world-overview-raster", "world-country-fill", "world-country-boundaries", "world-place-labels"].forEach((id) => state.layerGroups.set(id, ["overview"]));
   ["weather-point", "weather-label"].forEach((id) => state.layerGroups.set(id, ["weather"]));
@@ -3465,27 +3513,40 @@ function updateMeasure() {
 }
 
 async function switchTheme(theme) {
-  state.theme = theme;
-  localStorage.setItem("giss-theme", theme);
+  const normalizedTheme = theme === "osm-carto" ? "osm-carto" : "vector";
+  state.theme = normalizedTheme;
+  localStorage.setItem("giss-theme", normalizedTheme);
   document.querySelectorAll("[data-theme]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.theme === theme);
+    button.classList.toggle("active", button.dataset.theme === normalizedTheme);
   });
-  const generated = window.GissMapStyle.create(renderingMapCatalog(), theme);
+  const generated = window.GissMapStyle.create(renderingMapCatalog(), normalizedTheme);
   generated.style.layers.forEach((layer) => {
     if (!state.map.getLayer(layer.id)) return;
     Object.entries(layer.paint || {}).forEach(([property, value]) => {
       state.map.setPaintProperty(layer.id, property, value);
     });
+    Object.entries(layer.layout || {}).forEach(([property, value]) => {
+      state.map.setLayoutProperty(layer.id, property, value);
+    });
+    if (layer.filter) state.map.setFilter(layer.id, layer.filter);
     state.map.setLayerZoomRange(layer.id, layer.minzoom ?? 0, layer.maxzoom ?? 24);
   });
-  const onlineVectorStyle = createOnlineVectorStyle(theme);
+  const onlineVectorStyle = createOnlineVectorStyle(normalizedTheme);
   onlineVectorStyle?.style.layers.forEach((layer) => {
     if (!state.map.getLayer(layer.id)) return;
     Object.entries(layer.paint || {}).forEach(([property, value]) => {
       state.map.setPaintProperty(layer.id, property, value);
     });
+    Object.entries(layer.layout || {}).forEach(([property, value]) => {
+      state.map.setLayoutProperty(layer.id, property, value);
+    });
+    if (layer.filter) state.map.setFilter(layer.id, layer.filter);
     state.map.setLayerZoomRange(layer.id, layer.minzoom ?? 0, layer.maxzoom ?? 24);
   });
+  if (state.map.getLayer("local-osm-carto-raster")) {
+    state.map.setLayoutProperty("local-osm-carto-raster", "visibility", normalizedTheme === "osm-carto" ? "visible" : "none");
+  }
+  showToast(normalizedTheme === "osm-carto" ? "已切换到本地 OSM 原版渲染" : "已切换到交互矢量地图");
 }
 
 async function checkServices() {
@@ -3667,7 +3728,7 @@ function wireUi() {
       } else if (packCommand.dataset.resourcePackCommand === "verify") verifyRegionPack(packId);
       else if (packCommand.dataset.resourcePackCommand === "manifest") exportRegionPackManifest(packId);
       else if (packCommand.dataset.resourcePackCommand === "toggle") setRegionPackEnabled(packId, pack?.enabled === false);
-      else if (packCommand.dataset.resourcePackCommand === "rebuild") queueMaintenanceJob(packId, "build");
+      else if (packCommand.dataset.resourcePackCommand === "rebuild") queueMaintenanceJob(packId, "rebuild");
       else if (packCommand.dataset.resourcePackCommand === "open") {
         elements.resourceManagerDialog.close();
         activateRegionPack(packId);
@@ -3694,7 +3755,7 @@ function wireUi() {
     if (updateButton) {
       const item = state.resourceInventory?.updateChecks?.find((check) => check.id === updateButton.dataset.resourceUpdateNow);
       if (item?.heavy && !window.confirm(`${item.name}需要重建共享搜索与路线索引，可能持续数小时。确认加入队列吗？`)) return;
-      queueMaintenanceJob(updateButton.dataset.resourceUpdateNow, "update");
+      queueMaintenanceJob(updateButton.dataset.resourceUpdateNow, updateButton.dataset.resourceUpdateAction || "update");
       return;
     }
     if (event.target.closest("[data-resource-update-all]")) queueRegularUpdates();

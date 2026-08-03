@@ -2,7 +2,8 @@ param(
   [string]$OutputRoot = "",
   [switch]$SkipDockerImages,
   [bool]$IncludeNominatimIndex = $true,
-  [int]$Keep = 2
+  [bool]$IncludeOsmCartoIndex = $true,
+  [int]$Keep = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,12 +101,18 @@ foreach ($dataset in @($catalog.datasets)) {
   if ($productExists -ne $manifestExists) {
     throw "Regional pack $($dataset.id) is partially installed; both PMTiles and manifest are required."
   }
-  foreach ($relative in @($productRelative, $manifestRelative, $sourceRelative)) {
+  $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  $detailsRelative = if ($manifest.details.file) { ([string]$manifest.details.file).Replace('/', '\') } else { $null }
+  if (-not $detailsRelative -or -not (Test-Path -LiteralPath (Join-Path $root $detailsRelative) -PathType Leaf)) {
+    throw "Regional pack $($dataset.id) is missing its rich-detail PMTiles companion."
+  }
+  foreach ($relative in @($productRelative, $manifestRelative, $detailsRelative, $sourceRelative)) {
     Copy-PayloadFile (Join-Path $root $relative) $relative
   }
   $includedPacks += [pscustomobject][ordered]@{
     id = [string]$dataset.id
     product = $productRelative.Replace('\', '/')
+    details = $detailsRelative.Replace('\', '/')
     source = $sourceRelative.Replace('\', '/')
   }
 }
@@ -116,6 +123,8 @@ Copy-PayloadTree $latestBackup.FullName (Join-Path "backups" $latestBackup.Name)
 
 foreach ($resourceTree in @(
   @{ Source = "raw\natural-earth"; Target = "raw\natural-earth" },
+  @{ Source = "raw\osm\carto"; Target = "raw\osm\carto" },
+  @{ Source = "products\osm-carto"; Target = "products\osm-carto" },
   @{ Source = "products\weather"; Target = "products\weather" },
   @{ Source = "products\nautical"; Target = "products\nautical" },
   @{ Source = "products\encyclopedia"; Target = "products\encyclopedia" }
@@ -128,18 +137,25 @@ $advancedIncluded = Test-Path -LiteralPath $advancedManifest -PathType Leaf
 if ($advancedIncluded) {
   foreach ($relative in @(
     "raw\osm\china\giss-core-latest.osm.pbf",
-    "raw\osm\china\giss-core.manifest.json",
-    "products\routing\valhalla\giss-core-latest.osm.pbf",
-    "products\routing\valhalla\valhalla_tiles.tar",
-    "products\routing\valhalla\valhalla.json",
-    "products\routing\valhalla\admins.sqlite",
-    "products\routing\valhalla\timezones.sqlite",
-    "products\routing\valhalla\default_speeds.json",
-    "products\routing\valhalla\file_hashes.txt"
+    "raw\osm\china\giss-core.manifest.json"
   )) {
     Copy-PayloadFile (Join-Path $root $relative) $relative
   }
-  Copy-PayloadTree (Join-Path $root "products\routing\valhalla\elevation_data") "products\routing\valhalla\elevation_data"
+  $activeRouting = Join-Path $root "products\routing\valhalla"
+  if (Get-Command docker -ErrorAction SilentlyContinue) {
+    $valhallaInspect = docker inspect giss-valhalla 2>$null | ConvertFrom-Json
+    if ($LASTEXITCODE -eq 0 -and @($valhallaInspect).Count -gt 0) {
+      $activeMount = $valhallaInspect[0].Mounts | Where-Object { $_.Destination -eq "/custom_files" } | Select-Object -First 1
+      if ($activeMount.Source) { $activeRouting = [string]$activeMount.Source }
+    }
+  }
+  foreach ($name in @(
+    "giss-core-latest.osm.pbf", "valhalla_tiles.tar", "valhalla.json", "admins.sqlite",
+    "timezones.sqlite", "default_speeds.json", "file_hashes.txt"
+  )) {
+    Copy-PayloadFile (Join-Path $activeRouting $name) (Join-Path "products\routing\valhalla" $name)
+  }
+  Copy-PayloadTree (Join-Path $activeRouting "elevation_data") "products\routing\valhalla\elevation_data"
 }
 
 $images = @(
@@ -150,6 +166,7 @@ $images = @(
   "giss-osmium:1",
   "ghcr.io/onthegomap/planetiler:latest",
   "giss-ui-test:1",
+  "overv/openstreetmap-tile-server@sha256:b6a79da39b6d0758368f7c62d22e49dd3ec59e78b194a5ef9dee2723b1f3fa79",
   "mediagis/nominatim@sha256:7923a8e67197fc6d4f4ecb7c0e8bbedffeddcfdf4519596fe946e46a28f5a9f8",
   "ghcr.io/valhalla/valhalla-scripted@sha256:3d7a08f7e78b356ee873b61711b743ad81bcc114b0ca5731217da8bba6ba39d1",
   "ghcr.io/kiwix/kiwix-serve@sha256:57baa553c46cd30770905df15a9a687258aa5471c30c8edaefe278f1784e1aa8"
@@ -179,6 +196,30 @@ if ($advancedIncluded -and $IncludeNominatimIndex) {
   }
 }
 
+$osmCartoIncluded = $false
+$osmCartoArchiveName = "osm-carto-data.tar.gz"
+$osmCartoManifest = Join-Path $root "products\osm-carto\osm-carto.manifest.json"
+if ($IncludeOsmCartoIndex -and (Test-Path -LiteralPath $osmCartoManifest -PathType Leaf)) {
+  $cartoInspect = (docker inspect giss-osm-carto | ConvertFrom-Json)[0]
+  Assert-NativeSuccess "Inspecting the OSM Carto renderer"
+  $cartoVolume = [string]($cartoInspect.Mounts |
+    Where-Object { $_.Destination -eq "/data/database" } |
+    Select-Object -First 1 -ExpandProperty Name)
+  if (-not $cartoVolume) { throw "OSM Carto database volume could not be identified." }
+  Write-Host "Creating a consistent OSM Carto database snapshot..."
+  docker stop giss-osm-carto | Out-Null
+  try {
+    docker run --rm -v "${cartoVolume}:/source:ro" -v "${dockerDirectory}:/backup" `
+      postgis/postgis@sha256:1d95a92144c40198b46908fd92ac365e85d35eaf31bfc36f06c2c09a090c0538 `
+      tar -C /source -czf "/backup/$osmCartoArchiveName" .
+    Assert-NativeSuccess "Archiving the OSM Carto database volume"
+    $osmCartoIncluded = $true
+  }
+  finally {
+    docker start giss-osm-carto | Out-Null
+  }
+}
+
 if (-not $SkipDockerImages) {
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker is required to export offline images." }
   foreach ($image in $images) {
@@ -191,7 +232,7 @@ if (-not $SkipDockerImages) {
 }
 
 $kitInfo = [ordered]@{
-  schemaVersion = 3
+  schemaVersion = 4
   id = $timestamp
   generatedAt = (Get-Date).ToUniversalTime().ToString("o")
   sourceRoot = $root
@@ -204,6 +245,8 @@ $kitInfo = [ordered]@{
   advancedCapabilities = $advancedIncluded
   nominatimIndexIncluded = $nominatimIndexIncluded
   nominatimIndexArchive = if ($nominatimIndexIncluded) { "docker/$nominatimArchiveName" } else { $null }
+  osmCartoIncluded = $osmCartoIncluded
+  osmCartoArchive = if ($osmCartoIncluded) { "docker/$osmCartoArchiveName" } else { $null }
 }
 [IO.File]::WriteAllText((Join-Path $target "kit-info.json"), ($kitInfo | ConvertTo-Json -Depth 5), $utf8NoBom)
 Copy-Item -LiteralPath (Join-Path $root "docs\OFFLINE_RECOVERY.md") -Destination (Join-Path $target "README-OFFLINE.md") -Force

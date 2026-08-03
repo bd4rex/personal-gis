@@ -54,4 +54,5 @@ data/media/
 data/exports/
 data/imports/
 data/terrain-cache/
+data/osm-carto-tiles/
 data/maintenance/

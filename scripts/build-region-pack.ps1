@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$PackId
+  [string]$PackId,
+  [string]$MaintenanceJobId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +25,7 @@ $sourceStaged = if ($buildMode -eq "extract") { Join-Path (Split-Path -Parent $s
 $outputRoot = Join-Path $root "products\tiles\pmtiles"
 $output = Join-Path $outputRoot "$PackId.pmtiles"
 $outputStaged = Join-Path $outputRoot "$PackId.staged.pmtiles"
+$dockerJobArguments = if ($MaintenanceJobId) { @("--label", "giss.maintenance-job=$MaintenanceJobId") } else { @() }
 
 function Assert-NativeSuccess([string]$Operation) {
   if ($LASTEXITCODE -ne 0) { throw "$Operation failed with exit code $LASTEXITCODE." }
@@ -62,7 +64,7 @@ try {
       $containerExtracts.Add($containerExtract)
       $hostExtracts.Add($hostExtract)
       Write-Host "Extracting $($member.name) from $($profile.provider) common snapshot..."
-      docker run --rm -v "${root}:/data" $osmiumImage extract `
+      docker run --rm @dockerJobArguments -v "${root}:/data" $osmiumImage extract `
         -p "/data/raw/osm/polygons/$($member.id).poly" -s complete_ways `
         "/data/$($snapshotRelative.Replace('\', '/'))" -o $containerExtract -O
       Assert-NativeSuccess "Extracting $($member.name)"
@@ -71,13 +73,13 @@ try {
     if (Test-Path -LiteralPath $sourceStaged) { Remove-Item -LiteralPath $sourceStaged -Force }
     Write-Host "Merging $($pack.name) extracts and deduplicating shared boundary objects..."
     $stagedContainer = "/data/$((($sourceStaged.Substring($root.Length)).TrimStart('\')).Replace('\', '/'))"
-    docker run --rm -v "${root}:/data" $osmiumImage merge @containerExtracts -o $stagedContainer
+    docker run --rm @dockerJobArguments -v "${root}:/data" $osmiumImage merge @containerExtracts -o $stagedContainer
     Assert-NativeSuccess "Merging $PackId extracts"
-    docker run --rm -v "${root}:/data" $osmiumImage fileinfo -e $stagedContainer | Out-Host
+    docker run --rm @dockerJobArguments -v "${root}:/data" $osmiumImage fileinfo -e $stagedContainer | Out-Host
     Assert-NativeSuccess "Reading $PackId metadata"
     $checkErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $referenceCheck = docker run --rm -v "${root}:/data" $osmiumImage check-refs $stagedContainer 2>&1
+    $referenceCheck = docker run --rm @dockerJobArguments -v "${root}:/data" $osmiumImage check-refs $stagedContainer 2>&1
     $referenceExitCode = $LASTEXITCODE
     $ErrorActionPreference = $checkErrorAction
     $referenceLines = @($referenceCheck | ForEach-Object { "$_" })
@@ -100,7 +102,7 @@ try {
   if (Test-Path -LiteralPath $outputStaged) { Remove-Item -LiteralPath $outputStaged -Force }
   $bounds = (@($pack.bounds) -join ',')
   Write-Host "Building staged $($pack.name) PMTiles..."
-  docker run --rm `
+  docker run --rm @dockerJobArguments `
     -e JAVA_TOOL_OPTIONS="-Xmx6g" `
     -v "${root}:/data" `
     $planetilerImage `
@@ -149,6 +151,7 @@ try {
     Write-Host "$PackId generated product is byte-identical; keeping one copy and refreshing its manifest."
     Remove-Item -LiteralPath $outputStaged -Force
     & (Join-Path $PSScriptRoot "write-region-manifest.ps1") -PackId $PackId
+    & (Join-Path $PSScriptRoot "build-region-details.ps1") -PackId $PackId -MaintenanceJobId $MaintenanceJobId
   }
   else {
     if (Test-Path -LiteralPath $output) { Move-Item -LiteralPath $output -Destination $previousOutput -Force }
@@ -156,6 +159,7 @@ try {
     try {
       Move-Item -LiteralPath $outputStaged -Destination $output -Force
       & (Join-Path $PSScriptRoot "write-region-manifest.ps1") -PackId $PackId
+      & (Join-Path $PSScriptRoot "build-region-details.ps1") -PackId $PackId -MaintenanceJobId $MaintenanceJobId
     }
     catch {
       if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }

@@ -76,6 +76,17 @@ if (@($kitInfo.operationalResources).Count) {
 if ($kitInfo.nominatimIndexIncluded -and -not ($entries.Path -contains $kitInfo.nominatimIndexArchive)) {
   throw "Offline-kit metadata references a missing Nominatim index archive."
 }
+if ($kitInfo.osmCartoIncluded) {
+  foreach ($relative in @(
+    [string]$kitInfo.osmCartoArchive,
+    "payload/GISS/products/osm-carto/osm-carto.manifest.json",
+    "payload/GISS/raw/osm/carto/jiangsu-anhui.osm.pbf"
+  )) {
+    if (-not $relative -or -not ($entries.Path -contains $relative)) {
+      throw "OSM Carto offline-kit payload is incomplete: $relative"
+    }
+  }
+}
 
 $verification = [ordered]@{
   schemaVersion = 1

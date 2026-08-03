@@ -31,9 +31,10 @@ if (-not (docker image ls -q $osmiumImage)) {
 }
 
 $inputs = @()
+$skippedCount = 0
 foreach ($dataset in @($catalog.datasets)) {
   if ($disabledPackIds -contains [string]$dataset.id) {
-    Write-Host "Skipping disabled region pack $($dataset.id)."
+    $skippedCount++
     continue
   }
   $sourceRelative = ([string]$dataset.sourceFile).Replace('/', '\')
@@ -43,7 +44,7 @@ foreach ($dataset in @($catalog.datasets)) {
   $productExists = Test-Path -LiteralPath $productPath -PathType Leaf
   $manifestExists = Test-Path -LiteralPath $packManifestPath -PathType Leaf
   if (-not $productExists -and -not $manifestExists) {
-    Write-Host "Skipping catalogued but uninstalled region pack $($dataset.id)."
+    $skippedCount++
     continue
   }
   if ($productExists -ne $manifestExists) {
@@ -68,6 +69,7 @@ foreach ($dataset in @($catalog.datasets)) {
 }
 
 if ($inputs.Count -lt 1) { throw "The map catalog contains no capability-source inputs." }
+Write-Host "Capability scope: $($inputs.Count) installed packs; skipped $skippedCount disabled or uninstalled catalog entries."
 $sequences = @($inputs.sourceSequence | Select-Object -Unique)
 $sourceSequence = if ($sequences.Count -eq 1) { $sequences[0] } else { "mixed" }
 

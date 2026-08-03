@@ -1,0 +1,57 @@
+param(
+  [string]$Image = "overv/openstreetmap-tile-server@sha256:b6a79da39b6d0758368f7c62d22e49dd3ec59e78b194a5ef9dee2723b1f3fa79",
+  [string]$DataVolume = "giss_osm_carto_data"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$externalRoot = Join-Path $root "raw\osm\carto\external"
+$externalConfig = Join-Path $root "config\osm-carto\external-data.local.yml"
+$repairScript = Join-Path $root "scripts\osm-carto-repair.sh"
+$network = "services_default"
+$assetContainer = "giss-osm-carto-assets"
+
+$required = @(
+  "simplified-water-polygons-split-3857.zip",
+  "water-polygons-split-3857.zip",
+  "antarctica-icesheet-polygons-3857.zip",
+  "antarctica-icesheet-outlines-3857.zip",
+  "ne_110m_admin_0_boundary_lines_land.zip"
+)
+foreach ($name in $required) {
+  $path = Join-Path $externalRoot $name
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    throw "Missing OSM Carto external dataset: $path"
+  }
+}
+
+if (-not (docker network ls -q --filter "name=^${network}$")) {
+  docker network create $network | Out-Null
+}
+if (docker ps -aq --filter "name=^${assetContainer}$") {
+  docker rm -f $assetContainer | Out-Null
+}
+try {
+  docker run -d --rm --name $assetContainer --network $network `
+    -v "${externalRoot}:/external:ro" `
+    --entrypoint python3 $Image `
+    -m http.server 8090 --bind 0.0.0.0 --directory /external | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not start the local Carto dataset server." }
+
+  $repairArgs = @(
+    "run", "--rm", "--name", "giss-osm-carto-repair",
+    "--network", $network, "--shm-size", "1g",
+    "-v", "${DataVolume}:/data/database/",
+    "-v", "${externalConfig}:/repair/external-data.yml:ro",
+    "-v", "${repairScript}:/repair/repair-external.sh:ro",
+    "--entrypoint", "bash", $Image, "/repair/repair-external.sh"
+  )
+  & docker @repairArgs
+  if ($LASTEXITCODE -ne 0) { throw "Repairing the OSM Carto external tables failed." }
+} finally {
+  if (docker ps -aq --filter "name=^${assetContainer}$") {
+    docker rm -f $assetContainer | Out-Null
+  }
+}
+
+Write-Host "OSM Carto external tables are complete."

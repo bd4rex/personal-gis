@@ -149,7 +149,22 @@ D:\GISS\rebuild-shared-indexes.cmd -Plan
 D:\GISS\rebuild-shared-indexes.cmd -ConfirmRebuild
 ```
 
-The confirmed operation may take many hours, but it no longer rebuilds either production index in place. It creates a resource-limited Valhalla candidate and a separate Nominatim candidate volume while the active map, search, and routing services stay online. The candidates are switched into service only after health and database checks pass. The previous pointers are retained for rollback, and a failed or cancelled build leaves the current version selected. Personal PostGIS data is never replaced.
+The confirmed operation may take many hours, but it no longer rebuilds either production index in place. It creates a resource-limited Valhalla candidate and a separate Nominatim candidate volume while the active map, search, and routing services stay online. The candidates are switched into service only after health and database checks pass. A successful activation keeps one previous version by default and prunes older unmounted candidates. A failed or cancelled build leaves the current version selected. Personal PostGIS data is never replaced.
+
+If a candidate reached validation but a later configuration step failed, resume that exact candidate instead of rebuilding it:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\rebuild-shared-indexes.ps1 -ResumeCandidateId YYYYMMDD-HHMMSS
+```
+
+After a verified disconnected recovery kit exists, obsolete rollback indexes can be listed and then removed explicitly:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\prune-shared-index-versions.ps1 -KeepPrevious 0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\prune-shared-index-versions.ps1 -KeepPrevious 0 -ConfirmPrune
+```
+
+The pruning script refuses to remove the Nominatim volume or Valhalla directory currently mounted by a container.
 
 The resource task page reports five phases: source snapshot, route candidate, search candidate, validation, and activation. A heavy shared-index task is never automatically retried after failure or a worker restart. Review its log and start a new task explicitly.
 
@@ -199,7 +214,7 @@ Create a complete kit after the normal health and smoke tests pass:
 D:\GISS\create-offline-kit.cmd
 ```
 
-The command first checks free space, creates a fresh personal backup; copies the application, every installed map pack and source, shared capability PBF, route graph, elevation grids, both Kiwix archives, global overview sources, weather, and nautical data; snapshots Nominatim; exports runtime/build/test Docker images; then writes and verifies a SHA256 manifest. Kits are written to `D:\GISS\offline-kit\<timestamp>`. After verification, the default policy retains the latest two valid kits and deletes failed/older kit directories through path-guarded cleanup.
+The command first checks free space, creates a fresh personal backup; copies the application, every installed map pack and source, shared capability PBF, route graph, elevation grids, both Kiwix archives, global overview sources, weather, nautical data, and the OSM Carto source; snapshots both Nominatim and the OSM Carto database; exports runtime/build/test Docker images; then writes and verifies a SHA256 manifest. Kits are written to `D:\GISS\offline-kit\<timestamp>`. After verification, the default policy retains the latest valid kit and deletes failed or older kit directories through path-guarded cleanup.
 
 Verify an existing kit without restoring it:
 
@@ -213,7 +228,18 @@ Run a non-destructive isolated recovery drill:
 D:\GISS\test-offline-recovery.cmd -KitDirectory D:\GISS\offline-kit\YYYYMMDD-HHMMSS
 ```
 
-The drill creates temporary containers on a Docker `--internal` network, restores PostGIS, media, and the Nominatim snapshot, starts the packaged Valhalla and Kiwix products, then verifies API health/status/search/export, address search, routing/elevation, encyclopedia access, Martin sources, nginx proxying, PMTiles headers, restored row counts, and blocked external routing. It removes temporary resources afterward; the JSON result remains under `runtime/recovery-audit`.
+The drill creates temporary containers on a Docker `--internal` network, restores PostGIS, media, and the Nominatim snapshot, starts the packaged Valhalla and Kiwix products, then verifies API health/status/search/export, address search, routing/elevation, encyclopedia access, Martin sources, nginx proxying, PMTiles headers, restored row counts, and blocked external routing. A full replacement-machine restore also restores the packaged OSM Carto volume before startup. The drill removes temporary resources afterward; the JSON result remains under `runtime/recovery-audit`.
+
+## Docker storage reclamation
+
+Deleting images or volumes frees space inside Docker but may not shrink `D:\DockerData\wsl\disk\docker_data.vhdx`. After creating and verifying a recovery kit, remove only confirmed unmounted resources, run `docker builder prune --all --force`, then reclaim host space during a maintenance window:
+
+1. Run `wsl -d docker-desktop -u root -- fstrim -av`.
+2. Stop the GIS_P Compose services and shut down Docker Desktop and WSL.
+3. Use DiskPart `select vdisk file="D:\DockerData\wsl\disk\docker_data.vhdx"` followed by `compact vdisk`.
+4. Start Docker Desktop, run `D:\GISS\start-giss.cmd`, then run health and smoke tests.
+
+Never compact a VHDX while Docker Desktop or its WSL distribution is running.
 
 The printable replacement-computer procedure is in `docs/OFFLINE_RECOVERY.md`.
 
@@ -224,8 +250,6 @@ D:\GISS\backup-giss.cmd
 D:\GISS\download-osm.cmd
 D:\GISS\region-pack.cmd Update -PackId jiangsu
 D:\GISS\region-pack.cmd Update -PackId anhui
-D:\GISS\region-pack.cmd Update -PackId shanghai
-D:\GISS\region-pack.cmd Update -PackId zhejiang
 D:\GISS\build-capability-source.cmd
 D:\GISS\sync-world-catalog.cmd
 D:\GISS\sync-weather.cmd

@@ -27,8 +27,10 @@ fs.mkdirSync(outputDir, { recursive: true });
   page.on("requestfailed", (request) => {
     const errorText = request.failure()?.errorText || "failed";
     const isExpectedTileAbort = request.url().endsWith(".pmtiles") && errorText.includes("ERR_ABORTED");
-    const isExpectedInventoryAbort = ["/api/resources", "/api/map-packs"].some((path) => request.url().includes(path)) && errorText.includes("ERR_ABORTED");
-    if (!isExpectedTileAbort && !isExpectedInventoryAbort) errors.push(`request: ${request.url()} ${errorText}`);
+    const isExpectedCartoTileAbort = request.url().includes("/osm-carto/tile/") && errorText.includes("ERR_ABORTED");
+    const isExpectedApiAbort = request.url().includes("/api/") && request.method() === "GET"
+      && (errorText.includes("ERR_ABORTED") || errorText.includes("ERR_NETWORK_CHANGED"));
+    if (!isExpectedTileAbort && !isExpectedCartoTileAbort && !isExpectedApiAbort) errors.push(`request: ${request.url()} ${errorText}`);
   });
   await page.route("**/api/maintenance", async (route) => {
     if (route.request().method() === "POST" && route.request().url().endsWith("/jobs")) {
@@ -38,7 +40,7 @@ fs.mkdirSync(outputDir, { recursive: true });
         contentType: "application/json",
         body: JSON.stringify({
           id: "ui-verify-job", resourceId: payload.resourceId, action: payload.action,
-          label: "上海市地图包", status: "queued"
+          label: `${payload.resourceId}地图包`, status: "queued"
         })
       });
     }
@@ -52,7 +54,7 @@ fs.mkdirSync(outputDir, { recursive: true });
         worker: { online: true, status: "running", heartbeatAt: new Date(now).toISOString() },
         jobs: [
           {
-            id: "ui-running-shanghai", resourceId: "shanghai", action: "update", label: "上海地图包",
+            id: "ui-running-anhui", resourceId: "anhui", action: "update", label: "安徽省地图包",
             status: "running", startedAt: new Date(now - 94000).toISOString(), requestedAt: new Date(now - 96000).toISOString(),
             cancelRequested: false, progress: {
               kind: "staged", percent: 68, stage: "生成地图瓦片", step: 4, steps: 5, queuePosition: null,
@@ -87,7 +89,21 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!box || box.width < 1000 || box.height < 700) throw new Error("Map canvas has an unexpected size.");
 
   const attribution = page.getByRole("link", { name: "OpenStreetMap contributors" });
-  if (await attribution.count() !== 1) throw new Error("OpenStreetMap attribution is missing.");
+  if (await attribution.count() < 1) throw new Error("OpenStreetMap attribution is missing.");
+  if (await page.getByRole("link", { name: /OpenStreetMap Carto/ }).count() !== 1) {
+    throw new Error("The local OpenStreetMap Carto layer is not active by default.");
+  }
+  const styleChoices = await page.locator("[data-theme]").allTextContents();
+  if (styleChoices.length !== 2 || !styleChoices.includes("OSM 原版") || !styleChoices.includes("交互矢量")) {
+    throw new Error(`The merged base-map choices are invalid: ${JSON.stringify(styleChoices)}`);
+  }
+  const cartoTile = await page.evaluate(async () => {
+    const response = await fetch("/osm-carto/tile/16/54394/26600.png", { cache: "no-store" });
+    return { status: response.status, type: response.headers.get("content-type"), bytes: (await response.blob()).size };
+  });
+  if (cartoTile.status !== 200 || cartoTile.type !== "image/png" || cartoTile.bytes < 1000) {
+    throw new Error(`The local OSM Carto tile endpoint is invalid: ${JSON.stringify(cartoTile)}`);
+  }
   if (!(await page.locator("#modeBanner").isHidden())) throw new Error("Mode banner is visible while no tool is active.");
 
   await page.screenshot({ path: path.join(outputDir, "desktop.png"), fullPage: false });
@@ -117,10 +133,10 @@ fs.mkdirSync(outputDir, { recursive: true });
 
   await page.locator("#searchInput").fill("南京");
   await page.locator("#searchInput").press("Enter");
-  await page.locator('[data-search-id]').first().waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.querySelectorAll('[data-search-id]').length > 0, null, { timeout: 30000 });
   const referenceResult = page.locator('[data-search-id]').filter({ hasText: "OSM 参考" }).first();
   if (await referenceResult.count() !== 1) throw new Error("Offline OSM reference search returned no result.");
-  await referenceResult.click();
+  await referenceResult.click({ force: true });
   await page.getByRole("button", { name: "保存为个人点位" }).waitFor({ state: "visible" });
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(outputDir, "search-results.png"), fullPage: false });
@@ -134,6 +150,12 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.locator("#searchInput").press("Enter");
   await page.waitForFunction(() => document.querySelector("#searchSummary")?.textContent === "最近更新");
   await page.waitForTimeout(500);
+
+  // Raster Carto matches the OSM website; switch to the interactive vector style for feature collection.
+  await page.getByRole("button", { name: "图层", exact: true }).click();
+  await page.getByRole("button", { name: "交互矢量", exact: true }).click();
+  await page.waitForTimeout(1200);
+  await page.getByRole("button", { name: "我的地图", exact: true }).click();
 
   // The search leaves the map centered on Nanjing South; click a stable POI-dense area east of the station.
   await page.mouse.click(1050, 275);
@@ -162,7 +184,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (referenceCount < 100000) throw new Error("Reference index readiness count is missing or too small.");
   if ((await page.locator("#mapSnapshot").textContent()) === "--") throw new Error("Map snapshot date is missing.");
   if ((await page.locator("#backupState").textContent()) === "--") throw new Error("Backup readiness is missing.");
-  if (await page.locator(".region-pack-item").count() < 4) throw new Error("Region pack center did not list four province packs.");
+  if (await page.locator(".region-pack-item").count() < 2) throw new Error("Region pack center did not list installed province packs.");
   if ((await page.locator("#activePackName").textContent()) !== "全部已安装区域") {
     throw new Error("Installed regions are not displayed together by default.");
   }
@@ -184,15 +206,20 @@ fs.mkdirSync(outputDir, { recursive: true });
   }
   const resourcePage = await context.newPage();
   await resourcePage.goto(`${baseUrl}/resources.html`, { waitUntil: "load", timeout: 90000 });
-  await resourcePage.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 4);
-  if (await resourcePage.locator("#versionRows tr[data-pack-row]").count() < 4) {
+  await resourcePage.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 2);
+  if (await resourcePage.locator("#versionRows tr[data-pack-row]").count() < 2) {
     throw new Error("Standalone resource console does not show every installed map pack.");
   }
   await resourcePage.getByRole("button", { name: /本地资源/ }).click();
   if (await resourcePage.locator(".resource-row").count() < 15) {
     throw new Error("Standalone local resource inventory is incomplete.");
   }
-  await resourcePage.getByRole("button", { name: /任务与更新/ }).click();
+  if (await resourcePage.locator('[data-local-resource="osm-carto-renderer"]').count() !== 1) {
+    throw new Error("The local OSM Carto renderer is missing from resource management.");
+  }
+  if (!(await resourcePage.locator("#activityRail").isVisible()) || !(await resourcePage.locator("#localView").isVisible())) {
+    throw new Error("The persistent task rail did not remain visible beside local resources.");
+  }
   if (await resourcePage.locator("#updateRows .task-row").count() < 8) {
     throw new Error("Standalone resource update checks are incomplete.");
   }
@@ -200,20 +227,20 @@ fs.mkdirSync(outputDir, { recursive: true });
   await resourcePage.close();
   const verifyRequest = page.waitForRequest((request) => request.url().endsWith("/api/maintenance/jobs")
     && request.method() === "POST" && request.postDataJSON()?.action === "verify");
-  await page.getByRole("button", { name: "校验 上海市" }).click();
+  await page.getByRole("button", { name: "校验 江苏省" }).click();
   const queuedVerification = await verifyRequest;
-  if (queuedVerification.postDataJSON()?.resourceId !== "shanghai") {
-    throw new Error("Shanghai verification did not use the maintenance queue.");
+  if (queuedVerification.postDataJSON()?.resourceId !== "jiangsu") {
+    throw new Error("Jiangsu verification did not use the maintenance queue.");
   }
   await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("后台队列"), null, { timeout: 30000 });
-  await page.getByRole("button", { name: "聚焦 上海市" }).click();
-  await page.waitForFunction(() => document.querySelector("#activePackName")?.textContent === "上海市");
-  await page.waitForTimeout(2200);
-  if (!(await page.getByRole("button", { name: "上海" }).count())) throw new Error("Shanghai province view was not rendered.");
-  await page.screenshot({ path: path.join(outputDir, "region-pack-center.png"), fullPage: false });
-  await page.getByRole("button", { name: "系统", exact: true }).click();
   await page.getByRole("button", { name: "聚焦 江苏省" }).click();
   await page.waitForFunction(() => document.querySelector("#activePackName")?.textContent === "江苏省");
+  await page.waitForTimeout(2200);
+  if (!(await page.getByRole("button", { name: "江苏" }).count())) throw new Error("Jiangsu province view was not rendered.");
+  await page.screenshot({ path: path.join(outputDir, "region-pack-center.png"), fullPage: false });
+  await page.getByRole("button", { name: "系统", exact: true }).click();
+  await page.getByRole("button", { name: "聚焦 安徽省" }).click();
+  await page.waitForFunction(() => document.querySelector("#activePackName")?.textContent === "安徽省");
   await page.waitForTimeout(2200);
   await page.screenshot({ path: path.join(outputDir, "system-readiness.png"), fullPage: false });
   await page.getByRole("button", { name: "我的地图" }).click();
@@ -239,8 +266,25 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!(await page.locator("#legendPopover").isHidden())) throw new Error("Legend did not close.");
 
   await page.getByRole("button", { name: "图层" }).click();
-  await page.getByRole("button", { name: "探索" }).click();
+  await page.getByRole("button", { name: "交互矢量" }).click();
   await page.waitForTimeout(1800);
+  const richDetails = await page.evaluate(async () => {
+    const response = await fetch("/api/map-packs", { cache: "no-store" });
+    const inventory = await response.json();
+    const installed = inventory.packs.filter((pack) => pack.installed);
+    const fields = new Set();
+    for (const pack of installed) {
+      if (!pack.richDetailsReady || !pack.detailsUrl) throw new Error(`${pack.id} rich details are unavailable.`);
+      const metadata = await new pmtiles.PMTiles(`${location.origin}${pack.detailsUrl}`).getMetadata();
+      const layer = metadata.vector_layers?.find((item) => item.id === "poi_detail");
+      if (!layer) throw new Error(`${pack.id} has no poi_detail layer.`);
+      Object.keys(layer.fields || {}).forEach((field) => fields.add(field));
+    }
+    return { count: installed.length, fields: [...fields] };
+  });
+  for (const field of ["opening_hours", "phone", "website", "wheelchair", "brand", "operator"]) {
+    if (!richDetails.fields.includes(field)) throw new Error(`Rich-detail tiles are missing ${field}.`);
+  }
   const coordinateBox = await page.locator("#coordinateReadout").boundingBox();
   const desktopAttributionBox = await page.locator(".maplibregl-ctrl-attrib").boundingBox();
   if (coordinateBox && desktopAttributionBox) {

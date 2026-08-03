@@ -5,15 +5,20 @@ param(
   [int]$NominatimTimeoutMinutes = 1440,
   [ValidateRange(2, 8)][int]$BuildCpus = 4,
   [ValidateRange(4, 10)][int]$BuildMemoryGB = 6,
-  [string]$MaintenanceJobId = ""
+  [string]$MaintenanceJobId = "",
+  [string]$ResumeCandidateId = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "catalog-utils.ps1")
 $services = Join-Path $root "services"
 $compose = Join-Path $services "docker-compose.yml"
 $envFile = Join-Path $services ".env"
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+if ($ResumeCandidateId -and $ResumeCandidateId -notmatch '^\d{8}-\d{6}$') {
+  throw "ResumeCandidateId must use yyyyMMdd-HHmmss format."
+}
+$timestamp = if ($ResumeCandidateId) { $ResumeCandidateId } else { Get-Date -Format "yyyyMMdd-HHmmss" }
 $audit = Join-Path $root "runtime\index-rebuild\$timestamp"
 $capabilityRoot = Join-Path $root "raw\osm\china"
 $capabilitySource = Join-Path $capabilityRoot "giss-core-latest.osm.pbf"
@@ -36,6 +41,7 @@ $report = [ordered]@{
   success = $false
   switched = $false
   error = $null
+  resumed = [bool]$ResumeCandidateId
 }
 $previousNominatimVolume = $null
 $previousRoutingPath = $null
@@ -55,7 +61,10 @@ function Read-DotEnv {
 }
 
 function Set-DotEnvValue([string]$Name, [string]$Value) {
-  $lines = if (Test-Path -LiteralPath $envFile -PathType Leaf) { [Collections.Generic.List[string]](Get-Content -LiteralPath $envFile) } else { [Collections.Generic.List[string]]::new() }
+  $lines = [Collections.Generic.List[string]]::new()
+  if (Test-Path -LiteralPath $envFile -PathType Leaf) {
+    foreach ($line in Get-Content -LiteralPath $envFile) { $lines.Add([string]$line) }
+  }
   $updated = $false
   for ($index = 0; $index -lt $lines.Count; $index++) {
     if ($lines[$index] -match "^\s*$([regex]::Escape($Name))=") {
@@ -85,16 +94,65 @@ function Get-ActiveMount([string]$Container, [string]$Destination, [string]$Prop
   return [string]$mount.$Property
 }
 
+function Get-CapabilityValidationPoints {
+  $manifestPath = Join-Path $capabilityRoot "giss-core.manifest.json"
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "Capability-source manifest is missing: $manifestPath"
+  }
+  $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  $catalog = Get-GissExpandedCatalog -Root $root
+  $datasets = @{}
+  foreach ($dataset in @($catalog.datasets)) { $datasets[[string]$dataset.id] = $dataset }
+
+  $points = @()
+  foreach ($input in @($manifest.inputs)) {
+    $id = [string]$input.id
+    $dataset = $datasets[$id]
+    if (-not $dataset -or @($dataset.bounds).Count -ne 4) {
+      throw "Installed capability input $id has no usable catalog bounds."
+    }
+    $bounds = @($dataset.bounds | ForEach-Object { [double]$_ })
+    $points += [pscustomobject][ordered]@{
+      id = $id
+      label = if ($dataset.name) { [string]$dataset.name } else { $id }
+      latitude = ($bounds[1] + $bounds[3]) / 2
+      longitude = ($bounds[0] + $bounds[2]) / 2
+    }
+  }
+  if ($points.Count -lt 1) { throw "No validation point could be derived from the installed map packs." }
+  return $points
+}
+
+function New-CapabilitySourceLink([string]$Destination) {
+  if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+  try {
+    New-Item -ItemType HardLink -Path $Destination -Target $capabilitySource -ErrorAction Stop | Out-Null
+    Write-Host "Linked the Valhalla source to the shared capability PBF without duplicating its bytes."
+  }
+  catch {
+    Write-Warning "A hard link could not be created; falling back to a full source copy: $($_.Exception.Message)"
+    Copy-Item -LiteralPath $capabilitySource -Destination $Destination -Force
+  }
+}
+
 function Wait-ContainerEndpoint([string]$Container, [string]$Url, [int]$TimeoutMinutes, [string]$Label) {
   $attempts = [math]::Max(1, $TimeoutMinutes * 6)
   for ($attempt = 0; $attempt -lt $attempts; $attempt++) {
     $state = ((docker inspect --format '{{.State.Status}}' $Container 2>$null) -join "").Trim()
     if ($state -eq "exited" -or $state -eq "dead") { throw "$Label candidate exited before validation." }
+    $savedErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
     docker exec $Container curl -fsS --max-time 8 $Url *> $null
-    if ($LASTEXITCODE -eq 0) { return }
+    $probeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedErrorAction
+    if ($probeExitCode -eq 0) { return }
     if ($attempt -gt 0 -and $attempt % 6 -eq 0) {
       Write-Host "$Label candidate is still building; the active map remains available."
-      docker logs --since 70s --tail 12 $Container 2>&1 | ForEach-Object { Write-Host $_ }
+      $savedLogErrorAction = $ErrorActionPreference
+      $ErrorActionPreference = "Continue"
+      $recentLogs = @(docker logs --since 70s --tail 12 $Container 2>&1)
+      $ErrorActionPreference = $savedLogErrorAction
+      $recentLogs | ForEach-Object { Write-Host "$_" }
     }
     Start-Sleep -Seconds 10
   }
@@ -114,7 +172,12 @@ function Wait-Healthy([string]$Container, [int]$TimeoutMinutes) {
 
 function Remove-CandidateContainers {
   foreach ($container in @($candidateNominatimContainer, $candidateValhallaContainer)) {
-    docker rm -f $container *> $null
+    $savedErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    docker container inspect $container *> $null
+    $exists = $LASTEXITCODE -eq 0
+    if ($exists) { docker rm -f $container *> $null }
+    $ErrorActionPreference = $savedErrorAction
   }
 }
 
@@ -156,13 +219,58 @@ try {
   if (-not $previousNominatimVolume -or -not $previousRoutingPath) { throw "The active index pointers could not be identified." }
   $report.previous = [ordered]@{ nominatimVolume = $previousNominatimVolume; valhallaPath = $previousRoutingPath }
 
+  if ($ResumeCandidateId) {
+    Write-Host "Resuming completed shared-index candidates from $ResumeCandidateId..."
+    if (-not (Test-Path -LiteralPath $capabilitySource -PathType Leaf)) { throw "The shared capability source is missing." }
+    $validationPoints = @(Get-CapabilityValidationPoints)
+    foreach ($name in @("giss-core-latest.osm.pbf", "valhalla_tiles.tar", "valhalla.json")) {
+      if (-not (Test-Path -LiteralPath (Join-Path $candidateRouting $name) -PathType Leaf)) {
+        throw "Resumable Valhalla candidate is missing $name."
+      }
+    }
+    docker volume inspect $candidateNominatimVolume *> $null
+    Assert-NativeSuccess "Finding the resumable Nominatim volume"
+    Remove-CandidateContainers
+
+    $resumeValhallaArgs = @(
+      "run", "-d", "--name", $candidateValhallaContainer,
+      "--label", "giss.role=shared-index-candidate", "--label", "giss.maintenance-job=$MaintenanceJobId",
+      "--memory", "4g", "--memory-swap", "5g", "--cpus", ([string][math]::Min(3, $BuildCpus)),
+      "-e", "use_tiles_ignore_pbf=True", "-e", "force_rebuild=False", "-e", "build_elevation=True",
+      "-e", "build_admins=True", "-e", "build_time_zones=True", "-e", "build_tar=True",
+      "-e", "server_threads=3", "-e", "use_default_speeds_config=True", "-e", "TZ=Asia/Shanghai",
+      "-v", "${candidateRouting}:/custom_files", $valhallaImage
+    )
+    & docker @resumeValhallaArgs | Out-Null
+    Assert-NativeSuccess "Starting the resumable Valhalla candidate"
+    Wait-ContainerEndpoint $candidateValhallaContainer "http://127.0.0.1:8002/status" 20 "Valhalla"
+    docker stop -t 30 $candidateValhallaContainer | Out-Null
+    Assert-NativeSuccess "Stopping the resumable Valhalla candidate"
+
+    $dotenv = Read-DotEnv
+    if (-not $dotenv.ContainsKey("NOMINATIM_PASSWORD") -or -not $dotenv.NOMINATIM_PASSWORD) { throw "NOMINATIM_PASSWORD is missing from services/.env." }
+    $resumeNominatimArgs = @(
+      "run", "-d", "--name", $candidateNominatimContainer,
+      "--label", "giss.role=shared-index-candidate", "--label", "giss.maintenance-job=$MaintenanceJobId",
+      "--memory", "${BuildMemoryGB}g", "--memory-swap", "$($BuildMemoryGB + 1)g", "--cpus", ([string]$BuildCpus), "--shm-size", "1g",
+      "-e", "PBF_PATH=/data/giss-core-latest.osm.pbf", "-e", "UPDATE_MODE=none", "-e", "FREEZE=true",
+      "-e", "IMPORT_STYLE=extratags", "-e", "IMPORT_WIKIPEDIA=false", "-e", "THREADS=3", "-e", "GUNICORN_WORKERS=2",
+      "-e", "NOMINATIM_PASSWORD=$($dotenv.NOMINATIM_PASSWORD)", "-e", "TZ=Asia/Shanghai",
+      "-v", "${candidateNominatimVolume}:/var/lib/postgresql/16/main", "-v", "${capabilityRoot}:/data:ro", $nominatimImage
+    )
+    & docker @resumeNominatimArgs | Out-Null
+    Assert-NativeSuccess "Starting the resumable Nominatim candidate"
+    Wait-ContainerEndpoint $candidateNominatimContainer "http://127.0.0.1:8080/status" 20 "Nominatim"
+  }
+  else {
   Write-Host "Building a shared source snapshot; active services remain online..."
   & (Join-Path $PSScriptRoot "build-capability-source.ps1")
   if (-not (Test-Path -LiteralPath $capabilitySource -PathType Leaf)) { throw "The shared source snapshot was not created." }
+  $validationPoints = @(Get-CapabilityValidationPoints)
 
   Write-Host "Building Valhalla candidate in isolation; active routing remains online..."
   New-Item -ItemType Directory -Force -Path $candidateRouting | Out-Null
-  Copy-Item -LiteralPath $capabilitySource -Destination (Join-Path $candidateRouting "giss-core-latest.osm.pbf") -Force
+  New-CapabilitySourceLink (Join-Path $candidateRouting "giss-core-latest.osm.pbf")
   $elevationSource = Join-Path $previousRoutingPath "elevation_data"
   if (Test-Path -LiteralPath $elevationSource -PathType Container) {
     robocopy $elevationSource (Join-Path $candidateRouting "elevation_data") /E /COPY:DAT /DCOPY:T /R:2 /W:2 /NFL /NDL /NJH /NJS | Out-Null
@@ -184,6 +292,11 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $candidateRouting "valhalla_tiles.tar") -PathType Leaf)) { throw "Valhalla candidate has no tile archive." }
   docker stop -t 30 $candidateValhallaContainer | Out-Null
   Assert-NativeSuccess "Stopping the validated Valhalla candidate"
+  $looseTiles = Join-Path $candidateRouting "valhalla_tiles"
+  if (Test-Path -LiteralPath $looseTiles -PathType Container) {
+    Remove-Item -LiteralPath $looseTiles -Recurse -Force
+    Write-Host "Removed regenerable loose Valhalla tiles; the validated tile archive is retained."
+  }
 
   Write-Host "Building Nominatim candidate in an isolated, resource-limited volume; active search remains online..."
   $dotenv = Read-DotEnv
@@ -205,15 +318,19 @@ try {
   & docker @nominatimArgs | Out-Null
   Assert-NativeSuccess "Starting the Nominatim candidate"
   Wait-ContainerEndpoint $candidateNominatimContainer "http://127.0.0.1:8080/status" $NominatimTimeoutMinutes "Nominatim"
+  }
 
   Write-Host "Validating candidate databases before switching..."
-  docker exec -u nominatim $candidateNominatimContainer nominatim check-database
+  docker exec -u nominatim $candidateNominatimContainer nominatim admin --check-database
   Assert-NativeSuccess "Checking the Nominatim candidate database"
-  foreach ($coordinate in @("32.0603,118.7969", "52.5200,13.4050")) {
-    $parts = $coordinate.Split(',')
-    $response = docker exec $candidateNominatimContainer curl -fsS --max-time 20 "http://127.0.0.1:8080/reverse?lat=$($parts[0])&lon=$($parts[1])&format=jsonv2"
-    Assert-NativeSuccess "Testing Nominatim coverage at $coordinate"
-    if (-not (($response -join "") | ConvertFrom-Json).display_name) { throw "Nominatim returned no result at $coordinate." }
+  foreach ($point in $validationPoints) {
+    $latitude = ([double]$point.latitude).ToString([Globalization.CultureInfo]::InvariantCulture)
+    $longitude = ([double]$point.longitude).ToString([Globalization.CultureInfo]::InvariantCulture)
+    $response = docker exec $candidateNominatimContainer curl -fsS --max-time 20 "http://127.0.0.1:8080/reverse?lat=$latitude&lon=$longitude&format=jsonv2"
+    Assert-NativeSuccess "Testing Nominatim coverage for $($point.label)"
+    if (-not (($response -join "") | ConvertFrom-Json).display_name) {
+      throw "Nominatim returned no result for installed map pack $($point.id) at $latitude,$longitude."
+    }
   }
 
   Write-Host "Promoting validated candidates and switching active pointers..."
@@ -263,4 +380,13 @@ catch {
 finally {
   $report.completedAt = [DateTimeOffset]::Now.ToString("o")
   [IO.File]::WriteAllText((Join-Path $audit "report.json"), ($report | ConvertTo-Json -Depth 8), $utf8)
+}
+
+if ($report.success) {
+  try {
+    & (Join-Path $PSScriptRoot "prune-shared-index-versions.ps1") -KeepPrevious 1 -ConfirmPrune | Out-Host
+  }
+  catch {
+    Write-Warning "The new indexes are active, but obsolete-version cleanup needs attention: $($_.Exception.Message)"
+  }
 }

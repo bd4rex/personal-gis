@@ -7,12 +7,15 @@ const state = {
   menuPackId: null,
   query: "",
   catalogQuery: "",
-  catalogScope: "recommended",
+  catalogRegionId: "world",
+  resourceCatalog: null,
   focusPackId: new URLSearchParams(location.search).get("pack"),
   polling: null,
   jobStatesReady: false,
   knownJobStates: new Map(),
   inventoryDirty: false,
+  inventoryWatcher: null,
+  maintenancePolling: false,
   refreshing: false
 };
 
@@ -65,7 +68,7 @@ function showNotice(message, error = false) {
   notice.classList.toggle("error", error);
   notice.hidden = false;
   clearTimeout(showNotice.timer);
-  showNotice.timer = setTimeout(() => { notice.hidden = true; }, 6500);
+  showNotice.timer = setTimeout(() => { notice.hidden = true; }, error ? 6500 : 3600);
 }
 
 function announceResourceChange(job) {
@@ -79,17 +82,20 @@ function announceResourceChange(job) {
 }
 
 function detectJobTransitions(jobs) {
+  let terminalTransition = false;
   if (state.jobStatesReady) {
     for (const job of jobs) {
       const previous = state.knownJobStates.get(job.id);
-      if (previous && ["queued", "running"].includes(previous) && job.status === "succeeded") {
-        announceResourceChange(job);
+      if (previous && ["queued", "running"].includes(previous) && !["queued", "running"].includes(job.status)) {
+        if (job.status === "succeeded") announceResourceChange(job);
         state.inventoryDirty = true;
+        terminalTransition = true;
       }
     }
   }
   state.knownJobStates = new Map(jobs.map((job) => [job.id, job.status]));
   state.jobStatesReady = true;
+  return terminalTransition;
 }
 
 async function api(path, options = {}) {
@@ -114,28 +120,40 @@ async function loadInventory() {
 }
 
 async function watchInventoryRefresh(previousGeneratedAt) {
-  for (let attempt = 0; attempt < 150; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    try {
-      const inventory = await api("/resources?cached=true");
-      if (inventory.generatedAt && inventory.generatedAt !== previousGeneratedAt) {
-        state.inventory = inventory;
-        state.inventoryDirty = false;
-        render();
-        showNotice("本地资源状态已刷新");
-        return;
-      }
-    } catch {}
-  }
+  if (state.inventoryWatcher) return state.inventoryWatcher;
+  state.inventoryWatcher = (async () => {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const inventory = await api("/resources?cached=true");
+        if (inventory.generatedAt && inventory.generatedAt !== previousGeneratedAt) {
+          state.inventory = inventory;
+          state.inventoryDirty = false;
+          render();
+          showNotice("本地资源状态已刷新");
+          return;
+        }
+      } catch {}
+    }
+  })().finally(() => {
+    state.inventoryWatcher = null;
+  });
+  return state.inventoryWatcher;
 }
 
 async function refresh({ upstream = false, quiet = false, freshInventory = false } = {}) {
-  if (state.refreshing) return;
+  if (state.refreshing) {
+    if (!quiet) showNotice("资源信息正在加载，请稍候");
+    return;
+  }
   state.refreshing = true;
   const refreshButton = $("#refreshButton");
   const upstreamButton = $("#upstreamButton");
   (upstream ? upstreamButton : refreshButton).disabled = true;
   (upstream ? upstreamButton : refreshButton).classList.add("loading");
+  if (!quiet) {
+    showNotice(upstream ? "正在后台检查上游版本" : "正在后台盘点本地资源，现有页面可以继续使用");
+  }
   try {
     if (upstream) await api("/resources?check_upstream=true");
     const shouldRefreshInventory = freshInventory || state.inventoryDirty;
@@ -146,6 +164,10 @@ async function refresh({ upstream = false, quiet = false, freshInventory = false
     ]);
     state.inventoryDirty = false;
     state.packs = packs.packs || [];
+    const installedIds = new Set(state.packs.filter((pack) => pack.installed).map((pack) => pack.id));
+    for (const packId of state.selected) {
+      if (!installedIds.has(packId)) state.selected.delete(packId);
+    }
     state.inventory = inventory;
     state.maintenance = maintenance;
     detectJobTransitions(maintenance.jobs || []);
@@ -153,16 +175,13 @@ async function refresh({ upstream = false, quiet = false, freshInventory = false
       const focusedPack = state.packs.find((pack) => pack.id === state.focusPackId);
       if (focusedPack && !focusedPack.installed) {
         state.view = "catalog";
-        state.catalogScope = "global";
         state.catalogQuery = packName(focusedPack);
         $("#catalogSearch").value = packName(focusedPack);
-        $$("[data-catalog-scope]").forEach((button) => button.classList.toggle("active", button.dataset.catalogScope === "global"));
       }
     }
     render();
-    if (inventory.cache?.state === "refreshing") {
+    if (["refreshing", "stale-refreshing", "building"].includes(inventory.cache?.state)) {
       watchInventoryRefresh(inventory.generatedAt);
-      if (!quiet) showNotice(upstream ? "正在后台检查上游版本" : "正在后台盘点本地资源");
     } else if (!quiet) {
       showNotice(upstream ? "上游版本检查完成" : "本地资源状态已刷新");
     }
@@ -184,10 +203,15 @@ function renderStorage() {
   const used = Number(storage.diskUsedBytes) || 0;
   const free = Number(storage.diskFreeBytes) || 0;
   const managed = Number(storage.managedBytes) || 0;
+  const managedPending = storage.managedBytes === null || storage.managedBytes === undefined;
   $("#storageFree").textContent = `${formatBytes(free)} 可用`;
-  $("#storageMeta").textContent = `磁盘总计 ${formatBytes(total)} · 资源清单 ${formatDate(state.inventory?.generatedAt)}`;
+  const cacheState = state.inventory?.cache?.state;
+  const cacheLabel = ["building", "refreshing", "stale-refreshing"].includes(cacheState) ? "后台刷新中" : formatDate(state.inventory?.generatedAt);
+  $("#storageMeta").textContent = `磁盘总计 ${formatBytes(total)} · 资源清单 ${cacheLabel}`;
   $("#storageUsedBar").style.width = `${total ? Math.min(100, used / total * 100) : 0}%`;
-  $("#managedSize").textContent = formatBytes(managed);
+  $("#storageManagedBar").style.width = `${total ? Math.min(100, managed / total * 100) : 0}%`;
+  $("#storageTrack").setAttribute("aria-label", `磁盘已用 ${formatBytes(used)}，其中 GIS_P 占用 ${formatBytes(managed)}`);
+  $("#managedSize").textContent = managedPending ? "计算中" : formatBytes(managed);
   $("#diskUsed").textContent = formatBytes(used);
 }
 
@@ -219,6 +243,35 @@ function taskForPack(packId) {
   return (state.maintenance?.jobs || []).find((job) =>
     job.resourceId === packId && ["queued", "running"].includes(job.status)
   );
+}
+
+async function pollMaintenance() {
+  if (state.refreshing || state.maintenancePolling) return;
+  state.maintenancePolling = true;
+  try {
+    const maintenance = await api("/maintenance");
+    const terminalTransition = detectJobTransitions(maintenance.jobs || []);
+    state.maintenance = maintenance;
+    renderNavigation();
+    renderVersions();
+    renderCatalog();
+    renderTasks();
+    icons();
+    if (terminalTransition) await refresh({ quiet: true, freshInventory: true });
+  } catch (error) {
+    console.warn("Maintenance polling failed", error);
+  } finally {
+    state.maintenancePolling = false;
+  }
+}
+
+function highlightActivityRail() {
+  const rail = $("#activityRail");
+  rail.classList.remove("attention");
+  void rail.offsetWidth;
+  rail.classList.add("attention");
+  clearTimeout(highlightActivityRail.timer);
+  highlightActivityRail.timer = setTimeout(() => rail.classList.remove("attention"), 1600);
 }
 
 function renderVersions() {
@@ -287,6 +340,38 @@ function resourceStatus(item) {
   return ["未安装", "disabled"];
 }
 
+function localResourceControl(item) {
+  const mode = item.managementMode || "system";
+  if (mode === "map-packs") {
+    return `<button class="command-button" type="button" data-local-view="versions"><i data-lucide="settings-2"></i><span>${escapeHtml(item.managementLabel || "管理")}</span></button>`;
+  }
+  if (mode === "maintenance") {
+    const resourceId = item.managementResourceId || item.id;
+    const job = taskForPack(resourceId);
+    const check = state.inventory?.updateChecks?.find((entry) => entry.id === resourceId);
+    const label = job ? (job.status === "running" ? "执行中" : "等待中")
+      : check?.updateAvailable ? (check.action === "rebuild" ? "重建" : "更新")
+      : item.managementLabel || "重新获取";
+    return `<button class="command-button" type="button" data-local-maintenance="${escapeHtml(resourceId)}" data-local-heavy="${item.managementHeavy ? "true" : "false"}" data-local-resource-name="${escapeHtml(item.name)}" ${job ? "disabled" : ""}><i data-lucide="${job ? "loader-circle" : check?.updateAvailable ? "refresh-cw" : "rotate-ccw"}"></i><span>${escapeHtml(label)}</span></button>`;
+  }
+  if (mode === "application") {
+    return `<a class="command-button local-link-button" href="${escapeHtml(item.managementHref || "/")}"><i data-lucide="external-link"></i><span>${escapeHtml(item.managementLabel || "打开")}</span></a>`;
+  }
+  return "";
+}
+
+function localResourceRow(item, groupName) {
+  const [label, tone] = resourceStatus(item);
+  const control = localResourceControl(item);
+  const subtitle = [groupName, item.subtitle].filter(Boolean).join(" · ");
+  return `<div class="resource-row" data-local-resource="${escapeHtml(item.id)}">
+    <span class="resource-icon"><i data-lucide="${escapeHtml(item.icon || "database")}"></i></span>
+    <span class="resource-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(subtitle)}</span></span>
+    <span class="resource-size">${item.bytes == null ? "Docker 卷" : formatBytes(item.bytes)}</span>
+    <span class="resource-controls"><span class="state-label ${tone}">${label}</span>${control}</span>
+  </div>`;
+}
+
 function renderLocal() {
   const summary = state.inventory?.summary || {};
   const hasActiveJobs = (state.maintenance?.jobs || []).some((job) => ["queued", "running"].includes(job.status));
@@ -296,34 +381,30 @@ function renderLocal() {
     ["源快照回退", summary.rollbackSourceBytes],
     ["可再生缓存", summary.regenerableCacheBytes]
   ].map(([label, bytes]) => `<div class="metric"><span>${label}</span><strong>${formatBytes(bytes || 0)}</strong></div>`).join("");
-  $("#localGroups").innerHTML = (state.inventory?.localGroups || []).map((group) => `
-    <section class="resource-group">
-      <div class="section-title"><h3>${escapeHtml(group.name)}</h3><span>${group.items?.length || 0} 项</span></div>
-      ${(group.items || []).map((item) => {
-        const [label, tone] = resourceStatus(item);
-        return `<div class="resource-row">
-          <span class="resource-icon"><i data-lucide="${escapeHtml(item.icon || "database")}"></i></span>
-          <span class="resource-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.subtitle || "")}</span></span>
-          <span class="resource-size">${item.bytes == null ? "Docker 卷" : formatBytes(item.bytes)}</span>
-          <span class="state-label ${tone}">${label}</span>
-        </div>`;
-      }).join("")}
-    </section>`).join("") + (state.inventory?.legacyPackages || []).map((legacy) => `<section class="resource-group">
-      <div class="section-title"><h3>旧区域包替代建议</h3><span>${escapeHtml(legacy.name)}</span></div>
-      <div class="resource-row">
-        <span class="resource-icon"><i data-lucide="split"></i></span>
-        <span class="resource-copy"><strong>${escapeHtml(legacy.name)}</strong><span>${escapeHtml(legacy.reason)} · 建议改用 ${(legacy.replacementPacks || []).map((item) => item.name).join("、")}</span></span>
-        <span class="resource-size">${formatBytes(legacy.bytes || 0)}</span>
-        <span class="state-label ${legacy.readyToRemove ? "update" : "disabled"}">${legacy.readyToRemove ? "可替代" : "先安装替代包"}</span>
-      </div>
-    </section>`).join("") + `<section class="resource-group">
-      <div class="section-title"><h3>可再生缓存</h3><span>${(state.inventory?.caches || []).length} 项</span></div>
-      ${(state.inventory?.caches || []).map((cache) => `<div class="resource-row">
+  const entries = (state.inventory?.localGroups || []).flatMap((group) => (group.items || []).map((item) => ({ item, groupName: group.name })))
+    .filter(({ item }) => item.id !== "regenerable-caches" && !(item.status === "missing" && !Number(item.bytes || 0)));
+  const manageable = entries.filter(({ item }) => ["map-packs", "maintenance", "application"].includes(item.managementMode));
+  const systemManaged = entries.filter(({ item }) => !["map-packs", "maintenance", "application"].includes(item.managementMode));
+  const legacyRows = (state.inventory?.legacyPackages || []).map((legacy) => `<div class="resource-row" data-local-resource="legacy:${escapeHtml(legacy.id)}">
+    <span class="resource-icon"><i data-lucide="split"></i></span>
+    <span class="resource-copy"><strong>${escapeHtml(legacy.name)}</strong><span>${escapeHtml(legacy.reason)} · 建议改用 ${(legacy.replacementPacks || []).map((item) => escapeHtml(item.name)).join("、")}</span></span>
+    <span class="resource-size">${formatBytes(legacy.bytes || 0)}</span>
+    <span class="resource-controls"><span class="state-label ${legacy.readyToRemove ? "update" : "disabled"}">${legacy.readyToRemove ? "可替代" : "先安装替代包"}</span></span>
+  </div>`);
+  $("#localGroups").innerHTML = `<section class="resource-group" data-local-management-group="manageable">
+      <div class="section-title"><h3>可管理资源</h3><span>${manageable.length + (state.inventory?.caches || []).length} 项</span></div>
+      ${manageable.map(({ item, groupName }) => localResourceRow(item, groupName)).join("")}
+      ${(state.inventory?.caches || []).map((cache) => `<div class="resource-row" data-local-resource="cache:${escapeHtml(cache.id)}">
         <span class="resource-icon"><i data-lucide="database-zap"></i></span>
-        <span class="resource-copy"><strong>${escapeHtml(cache.name)}</strong><span>${escapeHtml(cache.description || cache.pathLabel)}</span></span>
+        <span class="resource-copy"><strong>${escapeHtml(cache.name)}</strong><span>可再生缓存 · ${escapeHtml(cache.description || cache.pathLabel)}</span></span>
         <span class="resource-size">${formatBytes(cache.bytes || 0)}</span>
-        <button class="command-button" type="button" data-clear-cache="${escapeHtml(cache.id)}" ${cache.bytes && !(cache.id === "build-temp" && hasActiveJobs) ? "" : "disabled"}><i data-lucide="trash-2"></i><span>${cache.id === "build-temp" && hasActiveJobs ? "使用中" : "清理"}</span></button>
+        <span class="resource-controls"><span class="state-label disabled">可再生</span><button class="command-button" type="button" data-clear-cache="${escapeHtml(cache.id)}" ${cache.bytes && !(cache.id === "build-temp" && hasActiveJobs) ? "" : "disabled"}><i data-lucide="trash-2"></i><span>${cache.id === "build-temp" && hasActiveJobs ? "使用中" : "清理"}</span></button></span>
       </div>`).join("")}
+    </section>
+    <section class="resource-group" data-local-management-group="system">
+      <div class="section-title"><h3>系统托管与只读资源</h3><span>${systemManaged.length + legacyRows.length} 项</span></div>
+      ${systemManaged.map(({ item, groupName }) => localResourceRow(item, groupName)).join("")}
+      ${legacyRows.join("")}
     </section>`;
 }
 
@@ -333,38 +414,169 @@ function installEstimate(pack) {
   return estimate.length > 1 ? `${estimate[0]}-${estimate.at(-1)} GB` : `${estimate[0]} GB`;
 }
 
+function mergeResourceCatalog(baseCatalog, worldCatalog) {
+  const regions = new Map((baseCatalog.regions || []).map((region) => [region.id, { ...region }]));
+  Object.entries(worldCatalog?.regionPatches || {}).forEach(([regionId, patch]) => {
+    if (regions.has(regionId)) regions.set(regionId, { ...regions.get(regionId), ...patch });
+  });
+  (worldCatalog?.regions || []).forEach((region) => regions.set(region.id, { ...region }));
+
+  const rootOrder = ["north-america", "oceania", "africa", "antarctica", "south-america", "europe", "gf:russia", "asia", "gf:central-america"];
+  const root = regions.get(baseCatalog.rootRegion || "world");
+  if (root) root.children = rootOrder.filter((id) => regions.has(id));
+  for (const [parentId, promotedId] of [["europe", "gf:russia"], ["north-america", "gf:central-america"]]) {
+    const parent = regions.get(parentId);
+    if (parent) parent.children = (parent.children || []).filter((id) => id !== promotedId);
+    const promoted = regions.get(promotedId);
+    if (promoted) promoted.parent = root?.id || "world";
+  }
+  return { ...baseCatalog, worldCatalogVersion: worldCatalog?.version, regions: [...regions.values()] };
+}
+
+async function loadResourceCatalog() {
+  const [baseResponse, worldResponse] = await Promise.all([
+    fetch("/config/resource-catalog.json", { cache: "no-store" }),
+    fetch("/config/world-region-catalog.json", { cache: "no-store" })
+  ]);
+  if (!baseResponse.ok || !worldResponse.ok) throw new Error("资源目录加载失败");
+  state.resourceCatalog = mergeResourceCatalog(await baseResponse.json(), await worldResponse.json());
+}
+
+function catalogRegion(regionId) {
+  return state.resourceCatalog?.regions?.find((region) => region.id === regionId) || null;
+}
+
+function catalogRegionName(region) {
+  if (!region) return "";
+  const fallback = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区", RU: "俄罗斯" };
+  if (fallback[region.isoCode]) return fallback[region.isoCode];
+  if (region.isoCode && typeof Intl.DisplayNames === "function") {
+    try { return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(region.isoCode) || region.name; } catch {}
+  }
+  return region.name;
+}
+
+function catalogRegionPath(regionId) {
+  let current = catalogRegion(regionId);
+  const path = [];
+  const seen = new Set();
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    path.unshift(current);
+    current = current.parent ? catalogRegion(current.parent) : null;
+  }
+  return path;
+}
+
+function catalogRegionPackIds(region, seen = new Set()) {
+  if (!region || seen.has(region.id)) return [];
+  seen.add(region.id);
+  const ids = [...(region.datasetIds || [])];
+  for (const childId of region.children || []) ids.push(...catalogRegionPackIds(catalogRegion(childId), seen));
+  return [...new Set(ids)];
+}
+
+function renderCatalogBreadcrumb() {
+  const path = state.catalogQuery.trim()
+    ? [{ id: "world", name: "资源目录" }, { id: "search", name: "搜索结果" }]
+    : catalogRegionPath(state.catalogRegionId).map((region, index) => ({ id: region.id, name: index ? catalogRegionName(region) : "资源目录" }));
+  $("#catalogBreadcrumb").innerHTML = path.map((item, index) => `${index ? '<i data-lucide="chevron-right"></i>' : ""}<button type="button" data-catalog-region="${escapeHtml(item.id)}" ${item.id === "search" ? "disabled" : ""}>${escapeHtml(item.name)}</button>`).join("");
+}
+
+function catalogFolderRow(region) {
+  const packs = catalogRegionPackIds(region).map((id) => state.packs.find((pack) => pack.id === id)).filter(Boolean);
+  const installed = packs.filter((pack) => pack.installed).length;
+  const directCount = (region.children?.length || 0) + (region.datasetIds?.length || 0);
+  const meta = packs.length ? `${packs.length} 个地图包 · 已安装 ${installed}` : `${directCount} 个下级区域`;
+  return `<button class="catalog-folder-row" type="button" data-catalog-region="${escapeHtml(region.id)}">
+    <span class="catalog-folder-icon"><i data-lucide="${escapeHtml(region.icon || "globe-2")}"></i></span>
+    <span class="catalog-folder-copy"><strong>${escapeHtml(catalogRegionName(region))}</strong><span>${escapeHtml(meta)}</span></span>
+    <span class="catalog-folder-state">${Math.max(0, packs.length - installed)} 可获取</span>
+    <i data-lucide="chevron-right"></i>
+  </button>`;
+}
+
+function catalogPackRow(pack) {
+  const job = taskForPack(pack.id);
+  return `<div class="catalog-row" data-catalog-pack="${escapeHtml(pack.id)}">
+    <span class="pack-cell"><span class="pack-name"><i data-lucide="map"></i><strong>${escapeHtml(packName(pack))}</strong></span><small>${escapeHtml(pack.description || pack.administrativeType || "独立离线地图包")}</small></span>
+    <span class="catalog-source"><strong>${escapeHtml(pack.sourceProvider || "开放地图来源")}</strong><span>${escapeHtml(pack.sourceMode === "direct" ? "区域快照" : "从共享快照提取")}</span></span>
+    <span class="catalog-estimate"><strong>${escapeHtml(pack.installed ? formatBytes(pack.bytes) : installEstimate(pack))}</strong><span>${pack.installed ? (pack.enabled === false ? "已安装 · 已停用" : "已安装并启用") : "预计安装"}</span></span>
+    <span class="catalog-actions">
+      <button class="icon-button" type="button" data-locate-pack="${escapeHtml(pack.id)}" title="在地图中定位" aria-label="在地图中定位 ${escapeHtml(packName(pack))}"><i data-lucide="scan-search"></i></button>
+      ${pack.installed ? '<span class="state-label">已安装</span>' : `<button class="command-button" type="button" data-catalog-build="${escapeHtml(pack.id)}" ${job || !pack.buildReady ? "disabled" : ""}><i data-lucide="${job ? "loader-circle" : "download"}"></i><span>${job ? "处理中" : pack.buildReady ? "构建" : "源未就绪"}</span></button>`}
+    </span>
+  </div>`;
+}
+
+function catalogResourceState(type) {
+  const check = state.inventory?.updateChecks?.find((item) => item.id === type.installResourceId);
+  const local = state.inventory?.localGroups?.flatMap((group) => group.items || []).find((item) => item.id === type.inventoryId);
+  if (check) {
+    if (check.updateAvailable) return { label: check.statusKind === "missing" ? "未安装" : "可处理", tone: "update", action: check.action || "update" };
+    return { label: check.statusKind === "current" ? "最新" : "已安装", tone: "ready" };
+  }
+  if (local) return { label: local.status === "ready" ? (local.bytes ? formatBytes(local.bytes) : "已就绪") : "部分可用", tone: local.status === "ready" ? "ready" : "update" };
+  if (type.support === "planned") return { label: "尚未接入", tone: "disabled" };
+  return { label: type.support === "ready" ? "已就绪" : "部分可用", tone: type.support === "ready" ? "ready" : "update" };
+}
+
+function catalogResourceRow(type) {
+  const status = catalogResourceState(type);
+  const job = type.installResourceId ? taskForPack(type.installResourceId) : null;
+  return `<div class="catalog-resource-row" data-catalog-resource="${escapeHtml(type.id)}">
+    <span class="catalog-resource-icon"><i data-lucide="${escapeHtml(type.icon || "layers")}"></i></span>
+    <span class="catalog-folder-copy"><strong>${escapeHtml(type.name)}</strong><span>${escapeHtml(type.description || "独立资源")}</span></span>
+    <span class="state-label ${status.tone === "update" ? "update" : status.tone === "disabled" ? "disabled" : ""}">${escapeHtml(job ? "处理中" : status.label)}</span>
+    ${status.action ? `<button class="icon-button" type="button" data-catalog-resource-update="${escapeHtml(type.installResourceId)}" data-catalog-resource-action="${escapeHtml(status.action)}" ${job ? "disabled" : ""} title="${job ? "处理中" : "安装或更新"}${escapeHtml(type.name)}" aria-label="${job ? "处理中" : "安装或更新"}${escapeHtml(type.name)}"><i data-lucide="${job ? "loader-circle" : "download"}"></i></button>` : '<span class="catalog-resource-spacer"></span>'}
+  </div>`;
+}
+
+function catalogGroup(title, rows, meta = "") {
+  if (!rows.length) return "";
+  return `<section class="catalog-group"><div class="section-title"><h3>${escapeHtml(title)}</h3><span>${escapeHtml(meta || `${rows.length} 项`)}</span></div>${rows.join("")}</section>`;
+}
+
 function renderCatalog() {
   const query = state.catalogQuery.trim().toLocaleLowerCase("zh-CN");
-  let packs = state.packs.filter((pack) => !pack.installed);
-  if (state.catalogScope === "recommended" && !query) packs = packs.filter((pack) => pack.kind === "province");
+  renderCatalogBreadcrumb();
+  if (!state.resourceCatalog) {
+    $("#catalogResults").innerHTML = '<div class="empty">资源目录正在加载</div>';
+    return;
+  }
   if (query) {
-    packs = packs.filter((pack) =>
-      `${packName(pack)} ${pack.name} ${pack.id} ${pack.groupName || ""} ${pack.countryId || ""}`
-        .toLocaleLowerCase("zh-CN").includes(query)
-    );
+    const packs = state.packs.filter((pack) => `${packName(pack)} ${pack.name} ${pack.id} ${pack.groupName || ""} ${pack.countryId || ""}`.toLocaleLowerCase("zh-CN").includes(query));
+    const packIds = new Set(packs.map((pack) => pack.id));
+    const regions = state.resourceCatalog.regions.filter((item) => item.id !== "world"
+      && `${catalogRegionName(item)} ${item.name || ""} ${item.sourceName || ""} ${item.isoCode || ""}`.toLocaleLowerCase("zh-CN").includes(query)
+      && !(item.datasetIds || []).some((id) => packIds.has(id)));
+    const types = state.resourceCatalog.resourceTypes.filter((type) => `${type.name} ${type.description || ""}`.toLocaleLowerCase("zh-CN").includes(query));
+    const rows = [
+      catalogGroup("区域", [...regions.map(catalogFolderRow), ...packs.map(catalogPackRow)], `${regions.length + packs.length} 项`),
+      catalogGroup("资源类型", types.map(catalogResourceRow))
+    ].join("");
+    $("#catalogResults").innerHTML = rows || '<div class="empty">没有匹配的区域或资源</div>';
+    return;
   }
-  const groups = new Map();
-  for (const pack of packs) {
-    const group = pack.kind === "province" ? "中国省级行政区" : (pack.groupName || pack.countryId || "其他区域");
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group).push(pack);
+
+  const region = catalogRegion(state.catalogRegionId) || catalogRegion("world");
+  if (region.id === "world") {
+    const continents = (region.children || []).map(catalogRegion).filter(Boolean);
+    const typeById = new Map(state.resourceCatalog.resourceTypes.map((type) => [type.id, type]));
+    $("#catalogResults").innerHTML = [
+      catalogGroup("地图", continents.map(catalogFolderRow), `${continents.length} 个区域目录`),
+      ...(state.resourceCatalog.downloadSections || []).map((section) => catalogGroup(section.name, (section.resourceTypeIds || []).map((id) => typeById.get(id)).filter(Boolean).map(catalogResourceRow)))
+    ].join("");
+    return;
   }
-  $("#catalogResults").innerHTML = groups.size ? [...groups].map(([group, items]) => `
-    <section class="catalog-group">
-      <div class="section-title"><h3>${escapeHtml(group)}</h3><span>${items.length} 项</span></div>
-      ${items.map((pack) => {
-        const job = taskForPack(pack.id);
-        return `<div class="catalog-row" data-catalog-pack="${escapeHtml(pack.id)}">
-          <span class="pack-cell"><span class="pack-name"><i data-lucide="map"></i><strong>${escapeHtml(packName(pack))}</strong></span><small>${escapeHtml(pack.description || pack.administrativeType || "独立离线地图包")}</small></span>
-          <span class="catalog-source"><strong>${escapeHtml(pack.sourceProvider || "开放地图来源")}</strong><span>${escapeHtml(pack.sourceMode === "direct" ? "区域快照" : "从共享快照提取")}</span></span>
-          <span class="catalog-estimate"><strong>${escapeHtml(installEstimate(pack))}</strong><span>预计安装</span></span>
-          <span class="catalog-actions">
-            <button class="icon-button" type="button" data-locate-pack="${escapeHtml(pack.id)}" title="在地图中定位" aria-label="在地图中定位 ${escapeHtml(packName(pack))}"><i data-lucide="scan-search"></i></button>
-            <button class="command-button" type="button" data-catalog-build="${escapeHtml(pack.id)}" ${job || !pack.buildReady ? "disabled" : ""}><i data-lucide="${job ? "loader-circle" : "download"}"></i><span>${job ? "处理中" : pack.buildReady ? "构建" : "源未就绪"}</span></button>
-          </span>
-        </div>`;
-      }).join("")}
-    </section>`).join("") : '<div class="empty">没有匹配的可获取区域</div>';
+
+  const children = (region.children || []).map(catalogRegion).filter(Boolean);
+  const packs = (region.datasetIds || []).map((id) => state.packs.find((pack) => pack.id === id)).filter(Boolean)
+    .sort((a, b) => Number(a.groupOrder || 0) - Number(b.groupOrder || 0) || Number(a.order || 0) - Number(b.order || 0) || packName(a).localeCompare(packName(b), "zh-CN"));
+  $("#catalogResults").innerHTML = [
+    catalogGroup("下级区域", children.map(catalogFolderRow), `${children.length} 项`),
+    catalogGroup("地图包", packs.map(catalogPackRow), `${packs.length} 项`)
+  ].join("") || '<div class="empty">这个目录目前没有可获取的地图包</div>';
 }
 
 function activityText(job) {
@@ -374,7 +586,10 @@ function activityText(job) {
     const unit = activity.processedUnit === "tiles" ? "瓦片" : activity.processedUnit || "项";
     return `${Number(activity.processed).toLocaleString("zh-CN")} / ${Number(activity.total).toLocaleString("zh-CN")} ${unit}`;
   }
-  if (!activity || !Number.isFinite(Number(activity.rate))) return job.status === "queued" ? `队列第 ${job.progress?.queuePosition || "--"} 位` : "正在计算速率";
+  if (!activity || !Number.isFinite(Number(activity.rate))) {
+    if (job.status === "queued") return `队列第 ${job.progress?.queuePosition || "--"} 位`;
+    return job.progress?.kind === "indeterminate" ? "处理中" : "正在计算速率";
+  }
   const rate = Number(activity.rate);
   if (rate <= 0) return "正在准备地图要素";
   if (activity.unit === "bytes/s") return `${formatBytes(rate)}/s`;
@@ -382,30 +597,55 @@ function activityText(job) {
   return `${rate.toLocaleString("zh-CN", { maximumFractionDigits: 1 })} ${unit}`;
 }
 
+function jobActionText(job) {
+  return ({
+    build: "安装", update: "更新", rebuild: "重建", rollback: "回退",
+    verify: "校验", remove: "移除"
+  })[job.action] || job.action || "维护";
+}
+
+function jobResultText(job) {
+  if (job.status === "cancelled") return "已取消";
+  if (job.status === "failed") return "失败";
+  if (job.action === "remove") return "已移除";
+  if (job.action === "build") return "已安装";
+  return "完成";
+}
+
 function taskRow(job, active = true) {
   const progress = job.progress || {};
-  const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+  const determinate = progress.percent !== null && progress.percent !== undefined && Number.isFinite(Number(progress.percent));
+  const percent = determinate ? Math.max(0, Math.min(100, Number(progress.percent))) : 0;
   return `<div class="task-row">
-    <span class="task-copy"><strong>${escapeHtml(job.label || job.resourceId)}</strong><span>${escapeHtml(progress.stage || job.message || job.action)}</span></span>
+    <span class="task-copy"><strong>${escapeHtml(job.label || job.resourceId)} · ${escapeHtml(jobActionText(job))}</strong><span>${escapeHtml(progress.stage || job.message || job.action)}</span></span>
     ${active ? `<span class="progress-cell">
-      <span class="progress-track"><span style="width:${percent}%"></span></span>
-      <span class="progress-meta"><span>${percent}% · ${escapeHtml(activityText(job))}</span><span>${escapeHtml(formatDate(job.startedAt || job.requestedAt))}</span></span>
+      <span class="progress-track ${determinate ? "" : "indeterminate"}"><span style="width:${determinate ? percent : 36}%"></span></span>
+      <span class="progress-meta"><span>${determinate ? `${percent}% · ` : ""}${escapeHtml(activityText(job))}</span><span>${escapeHtml(formatDate(job.startedAt || job.requestedAt))}</span></span>
     </span>` : `<span class="version-cell"><span>${escapeHtml(job.message || job.progress?.stage || "")}</span><small>开始 ${escapeHtml(formatDate(job.startedAt || job.requestedAt))}</small><small>结束 ${escapeHtml(formatDate(job.finishedAt))}</small></span>`}
     ${active
       ? `<button class="command-button cancel" type="button" data-cancel-job="${escapeHtml(job.id)}" ${job.cancelRequested ? "disabled" : ""}><i data-lucide="circle-x"></i><span>${job.cancelRequested ? "停止中" : "取消"}</span></button>`
-      : `<span class="state-label ${job.status === "failed" ? "error" : job.status === "cancelled" ? "disabled" : ""}">${job.status === "succeeded" ? "完成" : job.status === "failed" ? "失败" : "已取消"}</span>`}
+      : job.status === "failed"
+        ? `<button class="command-button" type="button" data-retry-job="${escapeHtml(job.id)}"><i data-lucide="rotate-ccw"></i><span>重试</span></button>`
+        : `<span class="state-label ${job.status === "cancelled" ? "disabled" : ""}">${escapeHtml(jobResultText(job))}</span>`}
   </div>`;
 }
 
 function renderTasks() {
   const jobs = state.maintenance?.jobs || [];
   const active = jobs.filter((job) => ["queued", "running"].includes(job.status));
-  const history = jobs.filter((job) => !["queued", "running"].includes(job.status)).slice(0, 20);
+  const history = jobs.filter((job) => !["queued", "running"].includes(job.status)).slice(0, 8);
   const checks = state.inventory?.updateChecks || [];
+  const orderedChecks = [...checks].sort((left, right) => {
+    const leftActive = active.some((job) => job.resourceId === left.id);
+    const rightActive = active.some((job) => job.resourceId === right.id);
+    return Number(rightActive) - Number(leftActive)
+      || Number(right.updateAvailable) - Number(left.updateAvailable)
+      || String(left.name).localeCompare(String(right.name), "zh-CN");
+  });
   $("#activeTaskCount").textContent = `${active.length} 项`;
   $("#activeTasks").innerHTML = active.length ? active.map((job) => taskRow(job)).join("") : '<div class="empty">当前没有运行或排队的任务</div>';
   $("#updateCount").textContent = `${checks.filter((item) => item.updateAvailable).length} 项可处理`;
-  $("#updateRows").innerHTML = checks.length ? checks.map((item) => {
+  $("#updateRows").innerHTML = orderedChecks.length ? orderedChecks.map((item) => {
     const running = active.find((job) => job.resourceId === item.id);
     return `<div class="task-row">
       <span class="task-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.reason || "")}</span></span>
@@ -416,7 +656,7 @@ function renderTasks() {
         <small>上次检查 ${escapeHtml(formatDate(item.lastCheckedAt))} · 下次 ${escapeHtml(formatDate(item.nextCheckAt))}</small>
       </span>
       ${running ? '<span class="state-label update">处理中</span>' : item.updateAvailable
-        ? `<button class="command-button" type="button" data-resource-update="${escapeHtml(item.id)}"><i data-lucide="refresh-cw"></i><span>处理</span></button>`
+        ? `<button class="command-button" type="button" data-resource-update="${escapeHtml(item.id)}" data-resource-action="${escapeHtml(item.action || "update")}"><i data-lucide="${item.action === "rebuild" ? "hammer" : "refresh-cw"}"></i><span>${item.action === "rebuild" ? "重建" : "处理"}</span></button>`
         : '<span class="state-label">最新</span>'}
     </div>`;
   }).join("") : '<div class="empty">没有版本检查记录</div>';
@@ -449,8 +689,8 @@ async function createJob(packId, action) {
     });
     state.menuPackId = null;
     await refresh({ quiet: true });
-    state.view = "tasks";
     render();
+    highlightActivityRail();
     showNotice(`${packName(state.packs.find((pack) => pack.id === packId) || { id: packId })}已加入任务队列`);
   } catch (error) {
     requestError(error);
@@ -471,8 +711,8 @@ async function createBulkJobs(packIds, action) {
     }
     state.selected.clear();
     await refresh({ quiet: true });
-    state.view = "tasks";
     render();
+    highlightActivityRail();
     showNotice(`${packIds.length} 项任务已加入队列`);
   } catch (error) {
     requestError(error);
@@ -562,14 +802,11 @@ function wireEvents() {
     renderCatalog();
     icons();
   });
-  $$("[data-catalog-scope]").forEach((button) => button.addEventListener("click", () => {
-    state.catalogScope = button.dataset.catalogScope;
-    $$("[data-catalog-scope]").forEach((item) => item.classList.toggle("active", item === button));
-    renderCatalog();
-    icons();
-  }));
   $("#selectAllPacks").addEventListener("change", (event) => {
-    const visible = state.packs.filter((pack) => pack.installed);
+    const normalized = state.query.trim().toLocaleLowerCase("zh-CN");
+    const visible = state.packs.filter((pack) => pack.installed && (
+      !normalized || `${packName(pack)} ${pack.name} ${pack.id} ${pack.groupName || ""}`.toLocaleLowerCase("zh-CN").includes(normalized)
+    ));
     visible.forEach((pack) => event.target.checked ? state.selected.add(pack.id) : state.selected.delete(pack.id));
     renderVersions(); icons();
   });
@@ -592,8 +829,45 @@ function wireEvents() {
       catch (error) { requestError(error); }
       return;
     }
+    const retry = event.target.closest("[data-retry-job]");
+    if (retry) {
+      try {
+        await api(`/maintenance/jobs/${encodeURIComponent(retry.dataset.retryJob)}/retry`, { method: "POST" });
+        await refresh({ quiet: true });
+        highlightActivityRail();
+      } catch (error) { requestError(error); }
+      return;
+    }
     const resourceUpdate = event.target.closest("[data-resource-update]");
-    if (resourceUpdate) { await createJob(resourceUpdate.dataset.resourceUpdate, "update"); return; }
+    if (resourceUpdate) { await createJob(resourceUpdate.dataset.resourceUpdate, resourceUpdate.dataset.resourceAction || "update"); return; }
+    const catalogRegionButton = event.target.closest("[data-catalog-region]");
+    if (catalogRegionButton && catalogRegionButton.dataset.catalogRegion !== "search") {
+      state.catalogRegionId = catalogRegionButton.dataset.catalogRegion;
+      state.catalogQuery = "";
+      $("#catalogSearch").value = "";
+      renderCatalog();
+      icons();
+      return;
+    }
+    const catalogResourceUpdate = event.target.closest("[data-catalog-resource-update]");
+    if (catalogResourceUpdate) {
+      await createJob(catalogResourceUpdate.dataset.catalogResourceUpdate, catalogResourceUpdate.dataset.catalogResourceAction || "update");
+      return;
+    }
+    const localView = event.target.closest("[data-local-view]");
+    if (localView) {
+      state.view = localView.dataset.localView;
+      renderNavigation();
+      icons();
+      return;
+    }
+    const localMaintenance = event.target.closest("[data-local-maintenance]");
+    if (localMaintenance) {
+      const resourceName = localMaintenance.dataset.localResourceName || "该资源";
+      if (localMaintenance.dataset.localHeavy === "true" && !confirm(`${resourceName}属于大型资源，重新处理可能耗时较长并占用额外磁盘空间。继续吗？`)) return;
+      await createJob(localMaintenance.dataset.localMaintenance, "update");
+      return;
+    }
     const clearCache = event.target.closest("[data-clear-cache]");
     if (clearCache) {
       const cacheId = clearCache.dataset.clearCache;
@@ -632,6 +906,7 @@ function wireEvents() {
 
 wireEvents();
 icons();
+await loadResourceCatalog();
 await refresh({ quiet: true });
-state.polling = setInterval(() => refresh({ quiet: true }), 4000);
+state.polling = setInterval(() => pollMaintenance(), 3000);
 window.addEventListener("beforeunload", () => clearInterval(state.polling));

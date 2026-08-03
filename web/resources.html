@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f4f5f2" />
     <title>资源与版本 - GIS_P</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/src/resources.css?v=20260731-1" />
+    <link rel="stylesheet" href="/src/resources.css?v=20260802-5" />
   </head>
   <body>
     <header class="app-header">
@@ -29,14 +29,17 @@
         <strong id="storageFree">读取磁盘空间</strong>
         <span id="storageMeta">GIS_P 资源盘点中</span>
       </div>
-      <div class="storage-track"><span id="storageUsedBar"></span></div>
+      <div id="storageTrack" class="storage-track" role="img" aria-label="正在读取磁盘占用">
+        <span id="storageUsedBar" class="disk-usage"></span>
+        <span id="storageManagedBar" class="managed-usage"></span>
+      </div>
       <div class="storage-key">
-        <span><i class="key-dot managed"></i><b id="managedSize">--</b> GIS_P 可计量</span>
+        <span><i class="key-dot managed"></i><b id="managedSize">--</b> GIS_P 占用</span>
         <span><i class="key-dot disk"></i><b id="diskUsed">--</b> 磁盘已用</span>
       </div>
     </section>
 
-    <div id="notice" class="notice" role="status" hidden></div>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
     <div class="workspace">
       <aside class="section-nav">
@@ -45,13 +48,10 @@
             <i data-lucide="git-compare-arrows"></i><span>地图版本</span><b id="versionBadge">--</b>
           </button>
           <button type="button" data-view="catalog">
-            <i data-lucide="map-plus"></i><span>添加区域</span><b id="catalogBadge">--</b>
+            <i data-lucide="map-pinned"></i><span>添加区域</span><b id="catalogBadge">--</b>
           </button>
           <button type="button" data-view="local">
             <i data-lucide="hard-drive"></i><span>本地资源</span><b id="localBadge">--</b>
-          </button>
-          <button type="button" data-view="tasks">
-            <i data-lucide="activity"></i><span>任务与更新</span><b id="taskBadge">--</b>
           </button>
         </nav>
         <div class="nav-summary">
@@ -103,17 +103,14 @@
           <header class="view-header">
             <div>
               <h2 id="catalogHeading">添加区域</h2>
-              <p>每个行政区域是独立地图包；构建时按其来源下载，不与相邻区域捆绑。</p>
+              <p>按大洲、国家和下级区域查找地图；世界级与通用资源按用途独立管理。</p>
             </div>
             <label class="search-field">
               <i data-lucide="search"></i>
-              <input id="catalogSearch" type="search" placeholder="搜索省份、国家或地区" autocomplete="off" />
+              <input id="catalogSearch" type="search" placeholder="搜索城市、地区或资源" autocomplete="off" />
             </label>
           </header>
-          <div class="catalog-filter" role="group" aria-label="区域范围">
-            <button class="active" type="button" data-catalog-scope="recommended">中国省级</button>
-            <button type="button" data-catalog-scope="global">全球目录</button>
-          </div>
+          <nav id="catalogBreadcrumb" class="catalog-breadcrumb" aria-label="资源目录路径"></nav>
           <div id="catalogResults" class="catalog-results"></div>
         </section>
 
@@ -128,27 +125,31 @@
           <div id="localGroups" class="resource-groups"></div>
         </section>
 
-        <section id="tasksView" class="view" aria-labelledby="tasksHeading">
-          <header class="view-header">
-            <div>
-              <h2 id="tasksHeading">任务与更新</h2>
-              <p>每项独立显示阶段、进度和处理速率，取消操作跟随任务。</p>
-            </div>
-          </header>
+      </main>
+
+      <aside id="activityRail" class="activity-rail" aria-labelledby="tasksHeading">
+        <header class="activity-rail-header">
+          <span>
+            <h2 id="tasksHeading">任务与更新</h2>
+            <small>队列与版本状态常驻显示</small>
+          </span>
+          <b id="taskBadge">--</b>
+        </header>
+        <div class="activity-rail-scroll">
           <section class="task-section">
             <div class="section-title"><h3>进行中</h3><span id="activeTaskCount">0 项</span></div>
-            <div id="activeTasks" class="task-list"></div>
+            <div id="activeTasks" class="task-list" aria-live="polite"></div>
           </section>
           <section class="task-section">
             <div class="section-title"><h3>版本检查</h3><span id="updateCount">0 项可处理</span></div>
             <div id="updateRows" class="update-list"></div>
           </section>
           <section class="task-section">
-            <div class="section-title"><h3>最近任务</h3><span>保留审计结果</span></div>
+            <div class="section-title"><h3>历史记录</h3><span>不代表当前已安装</span></div>
             <div id="historyTasks" class="history-list"></div>
           </section>
-        </section>
-      </main>
+        </div>
+      </aside>
     </div>
 
     <dialog id="detailDialog">
@@ -160,6 +161,6 @@
     </dialog>
 
     <script src="/vendor/lucide/lucide.min.js"></script>
-    <script type="module" src="/src/resources.js?v=20260731-1"></script>
+    <script type="module" src="/src/resources.js?v=20260802-8"></script>
   </body>
 </html>

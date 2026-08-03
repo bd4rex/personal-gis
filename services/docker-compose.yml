@@ -73,6 +73,9 @@ services:
       WEATHER_RESOURCE_ROOT: /data/weather-resources
       NAUTICAL_RESOURCE_ROOT: /data/nautical-resources
       OVERVIEW_RESOURCE_ROOT: /data/overview-resources
+      OSM_CARTO_MANIFEST_PATH: /data/osm-carto/osm-carto.manifest.json
+      OSM_CARTO_CACHE_ROOT: /data/osm-carto-cache
+      OSM_CARTO_URL: http://osm-carto:80
       MAINTENANCE_ROOT: /data/maintenance
       TZ: Asia/Shanghai
     volumes:
@@ -87,7 +90,7 @@ services:
       - ../raw/osm:/data/osm:ro
       - ../raw/osm/china/china.state.txt:/data/china.state.txt:ro
       - ../raw/osm/china/giss-core.manifest.json:/data/giss-core.manifest.json:ro
-      - ../products/routing/valhalla/elevation_data:/data/elevation:ro
+      - ${VALHALLA_DATA_PATH:-../products/routing/valhalla}/elevation_data:/data/elevation:ro
       - ../data/terrain-cache:/data/terrain-cache
       - ../tmp:/data/build-cache
       - ../raw/osm:/data/osm-resources:ro
@@ -97,6 +100,8 @@ services:
       - ../products/weather:/data/weather-resources:ro
       - ../products/nautical:/data/nautical-resources:ro
       - ../web/assets/overview:/data/overview-resources:ro
+      - ../products/osm-carto:/data/osm-carto:ro
+      - ../data/osm-carto-tiles:/data/osm-carto-cache:ro
       - ../data/maintenance:/data/maintenance
     expose:
       - "8000"
@@ -186,6 +191,30 @@ services:
       retries: 20
     restart: unless-stopped
 
+  osm-carto:
+    profiles: ["advanced"]
+    image: overv/openstreetmap-tile-server@sha256:b6a79da39b6d0758368f7c62d22e49dd3ec59e78b194a5ef9dee2723b1f3fa79
+    container_name: giss-osm-carto
+    shm_size: 1gb
+    command: ["run"]
+    environment:
+      THREADS: "4"
+      ALLOW_CORS: enabled
+      AUTOVACUUM: "on"
+      TZ: Asia/Shanghai
+    volumes:
+      - giss_osm_carto_data:/data/database/
+      - ../data/osm-carto-tiles:/data/tiles/
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/ >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 2m
+    restart: unless-stopped
+
   web:
     image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     container_name: giss-web
@@ -209,5 +238,8 @@ services:
 
 volumes:
   giss_postgis_data:
+  giss_osm_carto_data:
+    external: true
+    name: giss_osm_carto_data
   giss_nominatim_data:
     name: ${NOMINATIM_VOLUME_NAME:-services_giss_nominatim_data}

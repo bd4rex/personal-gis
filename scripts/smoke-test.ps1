@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $base = "http://localhost:8080/api"
+$webBase = "http://localhost:8080"
 $placeId = $null
 $collectionId = $null
 $trackIds = New-Object System.Collections.Generic.List[string]
@@ -43,7 +44,9 @@ try {
       ($availablePacks.Count + $independentPacks.Count) -ne 34) {
     throw "All 34 province-level resource units are required."
   }
-  if ($packStatus.coveredProvinceCount -lt 4) { throw "Legacy coverage was not expanded to the four currently covered provinces." }
+  if ($packStatus.coveredProvinceCount -ne $independentPacks.Count) {
+    throw "Province coverage does not match the currently installed independent packs."
+  }
   if ($worldPacks.Count -lt 500 -or @($worldPacks | Where-Object { $_.sourceProvider -eq "Geofabrik" }).Count -lt 500 -or
       @($worldPacks | Where-Object { -not $_.buildReady }).Count -gt 0) {
     throw "The global Geofabrik map-pack catalog is incomplete."
@@ -93,6 +96,18 @@ try {
   if ($manifestSample.management.disasterRecoveryBaseline -ne "full-snapshot") {
     throw "Map pack manifest export does not preserve the full-snapshot recovery baseline."
   }
+  if (-not $manifestSample.details.file -or -not $manifestSample.details.sha256 -or $manifestSample.details.layer -ne "poi_detail") {
+    throw "Map pack manifest does not describe its rich-detail companion."
+  }
+  $detailsRequest = [System.Net.HttpWebRequest]::Create("$webBase$($manifestSample.details.url)")
+  $detailsRequest.Method = "HEAD"
+  $detailsResponse = $detailsRequest.GetResponse()
+  try {
+    if ([int64]$detailsResponse.ContentLength -ne [int64]$manifestSample.details.bytes) {
+      throw "Rich-detail PMTiles content length does not match its manifest."
+    }
+  }
+  finally { $detailsResponse.Dispose() }
   $cacheInventory = Invoke-RestMethod -Uri "$base/caches"
   if (@($cacheInventory.items).Count -ne 3 -or @($cacheInventory.items | Where-Object { -not $_.regenerable }).Count) {
     throw "Cache maintenance allowlist is incomplete."
@@ -130,10 +145,24 @@ try {
   if (@($weather.features).Count -ne 29) { throw "Weather snapshot does not cover the 29 Jiangsu/Anhui cities." }
   $nautical = Invoke-RestMethod -Uri "$base/nautical" -TimeoutSec 30
   if (@($nautical.features).Count -lt 1000) { throw "Nautical reference layer is unexpectedly sparse." }
+  $nauticalManifest = Get-Content (Join-Path $root "products\nautical\nautical.manifest.json") -Raw | ConvertFrom-Json
+  $enabledNauticalPackIds = @($installedPacks | Where-Object { $_.enabled } | ForEach-Object { $_.id } | Sort-Object)
+  $nauticalInputIds = @($nauticalManifest.inputs | ForEach-Object { $_.id } | Sort-Object)
+  if ($nauticalManifest.schemaVersion -ne 2 -or @(Compare-Object $enabledNauticalPackIds $nauticalInputIds).Count) {
+    throw "Nautical inputs do not match the enabled installed map packs."
+  }
+  if (@($nauticalManifest.inputs | Where-Object { $_.bytes -le 0 -or -not $_.sha256 }).Count) {
+    throw "Nautical input provenance is incomplete."
+  }
+  $nauticalUpdate = @($resources.updateChecks | Where-Object { $_.id -eq "nautical" }) | Select-Object -First 1
+  if (-not $nauticalUpdate -or $nauticalUpdate.updateAvailable -or $nauticalUpdate.statusKind -ne "current") {
+    throw "Nautical resource remains incorrectly marked for update after a successful build."
+  }
   $overviewResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8080/assets/overview/gray-earth.jpg" -TimeoutSec 20
   if ($overviewResponse.StatusCode -ne 200 -or $overviewResponse.RawContentLength -lt 1MB) {
     throw "Global overview raster is unavailable."
   }
+  $baselineStatus = Invoke-RestMethod -Uri "$base/status"
   $enabledInstalledPackIds = @($installedPacks | Where-Object { $_.enabled } | ForEach-Object { $_.id } | Sort-Object)
   $capabilityProvinceIds = @($resources.capabilityPackIds | Sort-Object)
   $missingCapabilityPackIds = @($enabledInstalledPackIds | Where-Object { $capabilityProvinceIds -notcontains $_ })
@@ -322,7 +351,9 @@ try {
   if (@($trackMediaList).Count -ne 1) { throw "Track media was not linked." }
 
   $status = Invoke-RestMethod -Uri "$base/status"
-  if ($status.places -lt 3 -or $status.tracks -lt 2 -or $status.media -lt 1) {
+  if ($status.places -lt ($baselineStatus.places + 1) -or
+      $status.tracks -lt ($baselineStatus.tracks + 2) -or
+      $status.media -lt ($baselineStatus.media + 1)) {
     throw "API status counts do not include smoke-test records."
   }
   if ($status.reference_places -lt 100000 -or -not $status.reference_dataset.source_updated_at) {

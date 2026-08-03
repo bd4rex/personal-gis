@@ -11,6 +11,9 @@ $logsRoot = Join-Path $maintenanceRoot "logs"
 $workerPath = Join-Path $maintenanceRoot "worker.json"
 $settingsPath = Join-Path $maintenanceRoot "settings.json"
 $schedulerPath = Join-Path $maintenanceRoot "scheduler.json"
+$inventoryCachePath = Join-Path $maintenanceRoot "resource-inventory-cache.json"
+$inventoryRevisionPath = Join-Path $maintenanceRoot "resource-inventory-revision.json"
+$mapPackStatePath = Join-Path $maintenanceRoot "map-pack-state.json"
 $stopPath = Join-Path $maintenanceRoot "stop.request"
 $utf8 = New-Object Text.UTF8Encoding($false)
 
@@ -60,8 +63,8 @@ function Restore-InterruptedJobs {
   foreach ($path in Get-ChildItem -LiteralPath $jobsRoot -Filter "*.json" -File -ErrorAction SilentlyContinue) {
     $job = Read-JsonFile -Path $path.FullName
     if (-not $job -or $job.status -ne "running") { continue }
+    Stop-JobCandidates -JobId ([string]$job.id)
     if ($job.operation -eq "shared-capabilities") {
-      Stop-JobCandidates -JobId ([string]$job.id)
       Set-ObjectProperty -Value $job -Name "status" -PropertyValue "failed"
       Set-ObjectProperty -Value $job -Name "message" -PropertyValue "后台候选构建被系统中断；当前地图未切换，请检查后手动重试"
       Set-ObjectProperty -Value $job -Name "finishedAt" -PropertyValue ([DateTimeOffset]::Now.ToString("o"))
@@ -166,6 +169,41 @@ function Stop-JobCandidates {
   }
 }
 
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) { return }
+  try {
+    & taskkill.exe /PID $ProcessId /T /F *> $null
+    if ($LASTEXITCODE -ne 0) { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue }
+  }
+  catch { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Invalidate-ResourceInventory {
+  Write-JsonFile -Path $inventoryRevisionPath -Value ([ordered]@{
+    revision = [Guid]::NewGuid().ToString("N")
+    changedAt = [DateTimeOffset]::Now.ToString("o")
+  })
+}
+
+function Reset-PackPreference {
+  param([string]$PackId)
+  if (-not $PackId) { return }
+  $preferences = Read-JsonFile -Path $mapPackStatePath
+  if (-not $preferences) { return }
+  $disabled = @($preferences.disabledPackIds | Where-Object { [string]$_ -ne $PackId })
+  Set-ObjectProperty -Value $preferences -Name "disabledPackIds" -PropertyValue $disabled
+  Set-ObjectProperty -Value $preferences -Name "updatedAt" -PropertyValue ([DateTimeOffset]::Now.ToString("o"))
+  Write-JsonFile -Path $mapPackStatePath -Value $preferences
+}
+
+function Remove-RegionStaging {
+  param([object]$Job)
+  if ($Job.operation -ne "region-pack" -or $Job.action -notin @("build", "update", "rebuild")) { return }
+  $stagedProduct = Join-Path $root "products\tiles\pmtiles\$($Job.resourceId).staged.pmtiles"
+  Remove-Item -LiteralPath $stagedProduct -Force -ErrorAction SilentlyContinue
+}
+
 function Get-JobCommand {
   param([object]$Job)
   switch ([string]$Job.operation) {
@@ -178,7 +216,7 @@ function Get-JobCommand {
         "remove" { "Remove" }
         default { "Update" }
       }
-      $parameters = [ordered]@{ Action = $action; PackId = [string]$Job.resourceId }
+      $parameters = [ordered]@{ Action = $action; PackId = [string]$Job.resourceId; MaintenanceJobId = [string]$Job.id }
       if ($action -eq "Remove") { $parameters.ConfirmRemove = $true }
       return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "region-pack.ps1"); Parameters = $parameters }
     }
@@ -186,7 +224,7 @@ function Get-JobCommand {
     "world-region-catalog" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-world-catalog.ps1"); Parameters = [ordered]@{} } }
     "overview-map" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-overview-resources.ps1"); Parameters = [ordered]@{} } }
     "weather" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-weather.ps1"); Parameters = [ordered]@{} } }
-    "nautical" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "build-nautical.ps1"); Parameters = [ordered]@{} } }
+    "nautical" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "build-nautical.ps1"); Parameters = [ordered]@{ MaintenanceJobId = [string]$Job.id } } }
     "encyclopedia" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "download-encyclopedia.ps1"); Parameters = [ordered]@{} } }
     "travel-guide" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "download-travel-guide.ps1"); Parameters = [ordered]@{} } }
     default { throw "Maintenance operation is not allowlisted: $($Job.operation)" }
@@ -224,12 +262,12 @@ function Invoke-MaintenanceJob {
       $latestJob = Read-JsonFile -Path $JobFile.FullName
       if ($latestJob -and $latestJob.cancelRequested) {
         $cancelled = $true
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        Stop-ProcessTree -ProcessId $process.Id
         Stop-JobCandidates -JobId $jobId
         throw "任务已由用户取消"
       }
       if (Test-Path -LiteralPath $stopPath -PathType Leaf) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        Stop-ProcessTree -ProcessId $process.Id
         Stop-JobCandidates -JobId $jobId
         throw "维护服务已停止，任务被中断"
       }
@@ -250,6 +288,9 @@ function Invoke-MaintenanceJob {
     Set-ObjectProperty -Value $Job -Name "message" -PropertyValue "任务完成"
     Set-ObjectProperty -Value $Job -Name "exitCode" -PropertyValue 0
     Set-ObjectProperty -Value $Job -Name "nextAttemptAt" -PropertyValue $null
+    if ($Job.operation -eq "region-pack" -and $Job.action -in @("build", "remove")) {
+      Reset-PackPreference -PackId ([string]$Job.resourceId)
+    }
     # Keep the last complete inventory readable while the UI starts a fresh
     # background scan after observing this job transition.
     if ($Job.automatic) { Set-ScheduleSuccess -ResourceId ([string]$Job.resourceId) }
@@ -275,7 +316,9 @@ function Invoke-MaintenanceJob {
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     if ($Job.status -ne "queued") { Set-ObjectProperty -Value $Job -Name "finishedAt" -PropertyValue ([DateTimeOffset]::Now.ToString("o")) }
     Set-ObjectProperty -Value $Job -Name "cancelRequested" -PropertyValue $false
+    if ($Job.status -in @("failed", "cancelled")) { Remove-RegionStaging -Job $Job }
     Write-JsonFile -Path $JobFile.FullName -Value $Job
+    if ($Job.status -ne "queued") { Invalidate-ResourceInventory }
     Write-WorkerState
   }
 }
@@ -305,9 +348,14 @@ try {
   Write-WorkerState
   Restore-InterruptedJobs
   Remove-ExpiredHistory
+  $nextHistoryCleanup = [DateTimeOffset]::Now.AddHours(1)
   while (-not (Test-Path -LiteralPath $stopPath -PathType Leaf)) {
     Write-WorkerState
     Add-AutomaticJobs
+    if ([DateTimeOffset]::Now -ge $nextHistoryCleanup) {
+      Remove-ExpiredHistory
+      $nextHistoryCleanup = [DateTimeOffset]::Now.AddHours(1)
+    }
     $nextJob = Get-ChildItem -LiteralPath $jobsRoot -Filter "*.json" -File -ErrorAction SilentlyContinue |
       ForEach-Object { [pscustomobject]@{ File = $_; Job = (Read-JsonFile -Path $_.FullName) } } |
       Where-Object { $_.Job -and $_.Job.status -eq "queued" } |

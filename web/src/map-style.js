@@ -8,23 +8,7 @@
   ];
 
   const palettes = {
-    standard: {
-      background: "#f2efe9",
-      forest: "#add19e",
-      grass: "#cdebb0",
-      wetland: "#b8d9c0",
-      residential: "#e8e0d8",
-      industrial: "#dfd1d6",
-      commercial: "#f2dad9",
-      school: "#f0e6b2",
-      hospital: "#f5d6d6",
-      water: "#aad3df",
-      waterLine: "#79b6cb",
-      building: "#d8d0c8",
-      text: "#222222",
-      poi: "#2a6f9e"
-    },
-    explore: {
+    vector: {
       background: "#f4f1e8",
       forest: "#9fc78e",
       grass: "#c4e5a4",
@@ -34,6 +18,9 @@
       commercial: "#efd0ce",
       school: "#eadf9f",
       hospital: "#f2caca",
+      cemetery: "#c1d4ad",
+      sand: "#edddb0",
+      rock: "#cbc8c0",
       water: "#9bcddd",
       waterLine: "#64aac3",
       building: "#d3c8bd",
@@ -51,11 +38,16 @@
         if (definition.groups) groups.set(definition.layer.id, definition.groups);
         continue;
       }
-      for (const dataset of datasets) {
+      const targetDatasets = definition.detail
+        ? datasets.filter((dataset) => dataset.detailsUrl)
+        : definition.skipDetailed
+          ? datasets.filter((dataset) => !dataset.detailsUrl)
+          : datasets;
+      for (const dataset of targetDatasets) {
         const layer = {
           ...definition.layer,
           id: `${dataset.id}-${definition.layer.id}`,
-          source: dataset.id
+          source: definition.detail ? `${dataset.id}-details` : dataset.id
         };
         layers.push(layer);
         groups.set(layer.id, definition.groups || []);
@@ -65,17 +57,22 @@
   }
 
   function create(catalog, themeName) {
-    const palette = palettes[themeName] || palettes.standard;
-    const sources = Object.fromEntries(
-      catalog.datasets.map((dataset) => [
-        dataset.id,
-        dataset.source || {
+    const palette = palettes.vector;
+    const sources = {};
+    for (const dataset of catalog.datasets) {
+      sources[dataset.id] = dataset.source || {
           type: "vector",
           url: `pmtiles://${window.location.origin}${dataset.url}`,
           attribution: '© <a href="https://openmaptiles.org/">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-        }
-      ])
-    );
+      };
+      if (dataset.detailsUrl) {
+        sources[`${dataset.id}-details`] = {
+          type: "vector",
+          url: `pmtiles://${window.location.origin}${dataset.detailsUrl}`,
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+        };
+      }
+    }
 
     const lineGeometry = ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false];
     const poiIcon = [
@@ -89,6 +86,9 @@
       "hostel", "lodging_11",
       "hospital", "hospital_11",
       "clinic", "hospital_11",
+      "doctors", "doctors_11",
+      "dentist", "dentist_11",
+      "veterinary", "veterinary_11",
       "pharmacy", "pharmacy_11",
       "school", "school_11",
       "college", "college_11",
@@ -99,8 +99,15 @@
       "cinema", "cinema_11",
       "theatre", "theatre_11",
       "supermarket", "shop_11",
+      "grocery", "grocery_11",
       "convenience", "shop_11",
       "bakery", "bakery_11",
+      "butcher", "butcher_11",
+      "clothes", "clothing_store_11",
+      "hairdresser", "hairdresser_11",
+      "laundry", "laundry_11",
+      "alcohol", "alcohol_shop_11",
+      "gift", "gift_11",
       "fuel", "fuel_11",
       "parking", "parking_11",
       "bus_station", "bus_11",
@@ -113,12 +120,29 @@
       "toilets", "toilets_11",
       "drinking_water", "drinking_water_11",
       "attraction", "attraction_11",
+      "viewpoint", "attraction_11",
+      "zoo", "zoo_11",
+      "aquarium", "aquarium_11",
+      "theme_park", "amusement_park_11",
+      "camp_site", "campsite_11",
       "park", "park_11",
+      "garden", "garden_11",
       "playground", "playground_11",
+      "stadium", "stadium_11",
+      "pitch", "pitch_11",
+      "swimming_pool", "swimming_11",
+      "picnic_site", "picnic_site_11",
+      "monument", "monument_11",
+      "memorial", "monument_11",
+      "castle", "castle_11",
+      "archaeological_site", "monument_11",
+      "shelter", "shelter_11",
+      "telephone", "telephone_11",
+      "waste_basket", "waste_basket_11",
       "place_of_worship", "place_of_worship_11",
       "information", "information_11",
       "town_hall", "town_hall_11",
-      ["match", ["get", "class"], "shop", "shop_11", "railway", "railway_11", "circle_11"]
+      ["match", ["get", "class"], "shop", "shop_11", "railway", "railway_11", "dot_11"]
     ];
     const definitions = [
       {
@@ -132,7 +156,12 @@
           type: "fill",
           "source-layer": "landcover",
           paint: {
-            "fill-color": ["match", ["get", "class"], "wood", palette.forest, "forest", palette.forest, "wetland", palette.wetland, "grass", palette.grass, "scrub", palette.grass, palette.grass],
+            "fill-color": ["match", ["get", "class"],
+              "wood", palette.forest, "forest", palette.forest,
+              "wetland", palette.wetland, "grass", palette.grass,
+              "scrub", palette.grass, "farmland", "#e7e3ba",
+              "sand", palette.sand, "rock", palette.rock, "ice", "#e5f1f4",
+              palette.grass],
             "fill-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.25, 12, 0.62]
           }
         }
@@ -145,7 +174,12 @@
           "source-layer": "landuse",
           minzoom: 8,
           paint: {
-            "fill-color": ["match", ["get", "class"], "residential", palette.residential, "industrial", palette.industrial, "commercial", palette.commercial, "school", palette.school, "hospital", palette.hospital, "cemetery", "#cbd9b8", palette.residential],
+            "fill-color": ["match", ["get", "class"],
+              "residential", palette.residential, "industrial", palette.industrial,
+              "commercial", palette.commercial, "retail", palette.commercial,
+              "school", palette.school, "hospital", palette.hospital,
+              "cemetery", palette.cemetery, "railway", "#dedbd7",
+              "farmland", "#e8e4bd", palette.residential],
             "fill-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0.2, 13, 0.56]
           }
         }
@@ -153,6 +187,19 @@
       {
         groups: ["land"],
         layer: { id: "park", type: "fill", "source-layer": "park", paint: { "fill-color": palette.grass, "fill-opacity": 0.76 } }
+      },
+      {
+        groups: ["labels", "land"],
+        layer: {
+          id: "park-label", type: "symbol", "source-layer": "park", minzoom: 10,
+          filter: ["has", "name"],
+          layout: {
+            "text-field": nameField, "text-font": ["Noto Sans Regular"],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 16, 12],
+            "text-padding": 8, "symbol-sort-key": ["coalesce", ["get", "rank"], 20]
+          },
+          paint: { "text-color": "#47744d", "text-halo-color": "rgba(247,251,245,0.92)", "text-halo-width": 1.2 }
+        }
       },
       {
         groups: ["land"],
@@ -192,13 +239,30 @@
         }
       },
       {
+        groups: ["labels", "poi"],
+        layer: {
+          id: "aerodrome-label", type: "symbol", "source-layer": "aerodrome_label", minzoom: 8,
+          filter: ["has", "name"],
+          layout: {
+            "icon-image": "airport_11", "icon-size": 0.9, "icon-optional": true,
+            "text-field": nameField, "text-font": ["Noto Sans Regular"], "text-size": 11,
+            "text-offset": [0, 1], "text-anchor": "top", "text-padding": 6
+          },
+          paint: { "text-color": "#655577", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.2 }
+        }
+      },
+      {
         groups: ["land"],
         layer: {
           id: "boundary",
           type: "line",
           "source-layer": "boundary",
           filter: ["all", ["!=", ["get", "maritime"], 1]],
-          paint: { "line-color": "#9d8da3", "line-dasharray": [3, 2], "line-opacity": 0.7, "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 14, 2] }
+          paint: {
+            "line-color": ["match", ["get", "admin_level"], 2, "#816d88", 4, "#9d829d", "#ae9eaa"],
+            "line-dasharray": [3, 2], "line-opacity": 0.72,
+            "line-width": ["match", ["get", "admin_level"], 2, 1.8, 4, 1.25, 0.75]
+          }
         }
       }
     ];
@@ -242,6 +306,47 @@
         }
       },
       {
+        groups: ["roads"],
+        layer: {
+          id: "path-detail", type: "line", "source-layer": "transportation", minzoom: 13,
+          filter: ["all", lineGeometry, ["in", ["get", "subclass"], ["literal", ["path", "footway", "cycleway", "bridleway", "steps"]]]],
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["match", ["get", "subclass"], "cycleway", "#4f8f73", "steps", "#9b665d", "#9a7a68"],
+            "line-dasharray": [2, 1.5], "line-width": ["interpolate", ["linear"], ["zoom"], 13, 0.7, 18, 2.2]
+          }
+        }
+      },
+      {
+        groups: ["roads"],
+        layer: {
+          id: "tunnel-detail", type: "line", "source-layer": "transportation", minzoom: 11,
+          filter: ["all", lineGeometry, ["==", ["get", "brunnel"], "tunnel"]],
+          paint: { "line-color": "#858585", "line-dasharray": [2, 2], "line-opacity": 0.72, "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 18, 3.2] }
+        }
+      },
+      {
+        groups: ["roads"],
+        layer: {
+          id: "bridge-detail", type: "line", "source-layer": "transportation", minzoom: 11,
+          filter: ["all", lineGeometry, ["==", ["get", "brunnel"], "bridge"]],
+          paint: { "line-color": "#ffffff", "line-opacity": 0.52, "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1, 18, 3.8] }
+        }
+      },
+      {
+        groups: ["labels", "roads"],
+        layer: {
+          id: "road-ref", type: "symbol", "source-layer": "transportation_name", minzoom: 9,
+          filter: ["any", ["has", "ref"], ["has", "route_1_ref"]],
+          layout: {
+            "symbol-placement": "line", "symbol-spacing": 420,
+            "text-field": ["coalesce", ["get", "ref"], ["get", "route_1_ref"]],
+            "text-font": ["Noto Sans Regular"], "text-size": 9, "text-padding": 5
+          },
+          paint: { "text-color": "#66543e", "text-halo-color": "rgba(255,250,229,0.96)", "text-halo-width": 2 }
+        }
+      },
+      {
         groups: ["buildings"],
         layer: {
           id: "building", type: "fill", "source-layer": "building", minzoom: 13,
@@ -251,8 +356,8 @@
       {
         groups: ["poi"],
         layer: {
-          id: "poi-circle", type: "circle", "source-layer": "poi", minzoom: themeName === "explore" ? 12 : 13,
-          filter: ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
+          id: "poi-circle", type: "circle", "source-layer": "poi", minzoom: 12,
+          filter: ["all", ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false], ["has", "name"]],
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 1.5, 17, 4.5],
             "circle-color": ["match", ["get", "class"], "park", "#3e8a5b", "hospital", "#d95b55", "school", "#b98b26", "railway", "#715a91", palette.poi],
@@ -263,12 +368,14 @@
       {
         groups: ["poi"],
         layer: {
-          id: "poi-icon", type: "symbol", "source-layer": "poi", minzoom: themeName === "explore" ? 13 : 14,
+          id: "poi-icon", type: "symbol", "source-layer": "poi", minzoom: 12,
           filter: ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
           layout: {
             "icon-image": poiIcon,
             "icon-size": ["interpolate", ["linear"], ["zoom"], 13, 0.82, 17, 1],
-            "icon-padding": 2,
+            "icon-padding": 1,
+            "icon-optional": true,
+            "symbol-sort-key": ["coalesce", ["get", "rank"], 30],
             "icon-allow-overlap": false
           }
         }
@@ -299,6 +406,19 @@
       {
         groups: ["labels", "land"],
         layer: {
+          id: "waterway-label", type: "symbol", "source-layer": "waterway", minzoom: 9,
+          filter: ["has", "name"],
+          layout: {
+            "symbol-placement": "line", "text-field": nameField,
+            "text-font": ["Noto Sans Italic"], "text-size": 10,
+            "symbol-spacing": 350, "text-padding": 4
+          },
+          paint: { "text-color": "#3e829c", "text-halo-color": "rgba(255,255,255,0.86)", "text-halo-width": 1 }
+        }
+      },
+      {
+        groups: ["labels", "land"],
+        layer: {
           id: "water-label", type: "symbol", "source-layer": "water_name", minzoom: 8, filter: ["has", "name"],
           layout: { "text-field": nameField, "text-font": ["Noto Sans Italic"], "text-size": 11 },
           paint: { "text-color": "#3e829c", "text-halo-color": "rgba(255,255,255,0.84)", "text-halo-width": 1 }
@@ -315,9 +435,52 @@
       {
         groups: ["labels", "poi"],
         layer: {
-          id: "poi-label", type: "symbol", "source-layer": "poi", minzoom: themeName === "explore" ? 14 : 15, filter: ["has", "name"],
-          layout: { "text-field": nameField, "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 0.75], "text-anchor": "top", "text-padding": 3 },
+          id: "poi-label", type: "symbol", "source-layer": "poi", minzoom: 13, filter: ["has", "name"],
+          layout: {
+            "text-field": nameField, "text-font": ["Noto Sans Regular"], "text-size": 11,
+            "text-offset": [0, 0.75], "text-anchor": "top", "text-padding": 2,
+            "text-optional": true, "symbol-sort-key": ["coalesce", ["get", "rank"], 30]
+          },
           paint: { "text-color": "#315e75", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1 }
+        }
+      },
+      {
+        detail: true,
+        groups: ["poi"],
+        layer: {
+          id: "poi-detail-circle", type: "circle", "source-layer": "poi_detail", minzoom: 16,
+          filter: ["has", "name"],
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 1.8, 17, 4.8],
+            "circle-color": ["match", ["get", "category"], "amenity", "#2a6f9e", "shop", "#8a5c91", "tourism", "#a36b2f", "historic", "#8a6549", "#397e70"],
+            "circle-opacity": 0.5, "circle-stroke-width": 0.8, "circle-stroke-color": "#ffffff"
+          }
+        }
+      },
+      {
+        detail: true,
+        groups: ["poi"],
+        layer: {
+          id: "poi-detail-icon", type: "symbol", "source-layer": "poi_detail", minzoom: 12,
+          layout: {
+            "icon-image": poiIcon, "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.8, 17, 1],
+            "icon-padding": 1, "icon-optional": true
+          }
+        }
+      },
+      {
+        detail: true,
+        groups: ["labels", "poi"],
+        layer: {
+          id: "poi-detail-label", type: "symbol", "source-layer": "poi_detail", minzoom: 13,
+          filter: ["has", "name"],
+          layout: {
+            "text-field": ["coalesce", ["get", "name_zh"], ["get", "name"]],
+            "text-font": ["Noto Sans Regular"], "text-size": 11,
+            "text-offset": [0, 0.78], "text-anchor": "top", "text-padding": 2,
+            "text-optional": true
+          },
+          paint: { "text-color": "#315e75", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.1 }
         }
       },
       {
@@ -334,7 +497,7 @@
     return {
       style: {
         version: 8,
-        name: `GIS_P ${themeName}`,
+        name: "GIS_P interactive vector",
         glyphs: `${window.location.origin}/assets/glyphs/{fontstack}/{range}.pbf`,
         sprite: `${window.location.origin}/assets/sprites/ofm_f384/ofm`,
         sources,

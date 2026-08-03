@@ -58,7 +58,8 @@ GIS_P 的目标不是制作一张只能联网查看的地图，也不是复刻�
 
 | Part | Purpose |
 | --- | --- |
-| MapLibre GL JS | Renders the local vector map and personal layers in the browser |
+| MapLibre GL JS | Composes the local Carto raster map, interactive vector fallback, and personal layers in the browser |
+| OpenStreetMap Carto | Renders the Jiangsu/Anhui OSM snapshot locally through osm2pgsql, PostGIS, Mapnik, and mod_tile |
 | PMTiles | Stores each regional OpenMapTiles base map as one portable, checksum-tracked file |
 | FastAPI | CRUD, GPX import/export, owned media, unified search, status, and portable personal archives |
 | PostGIS | Personal source of truth plus a reproducible 126k-place offline OSM reference index |
@@ -92,6 +93,14 @@ Prepare or rebuild the advanced offline capabilities:
 D:\GISS\prepare-advanced.cmd
 ```
 
+Build or resume the OSM website-style local renderer independently:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\build-osm-carto.ps1
+```
+
+The command merges the current Jiangsu and Anhui sources, imports them into a dedicated Carto database, resumes interrupted external-data imports, and preserves the existing map until the renderer is healthy. The browser defaults to **OSM 原版**; the merged **交互矢量** alternative retains clickable feature-property and collection workflows.
+
 This merges installed region sources into one capability PBF; prepares the encyclopedia, travel guide, global overview, weather, and nautical references; builds the Valhalla graph and elevation cache; and imports Nominatim. The first build is CPU-, memory-, and disk-intensive; later starts reuse the products and index.
 
 ## Everyday operations
@@ -113,11 +122,11 @@ D:\GISS\create-offline-kit.cmd
 D:\GISS\test-offline-recovery.cmd
 ```
 
-The recovery test restores the kit on a temporary Docker `--internal` network and writes an audit report under `runtime/recovery-audit` without stopping the live system.
+The recovery test restores the kit on a temporary Docker `--internal` network and writes an audit report under `runtime/recovery-audit` without stopping the live system. The default policy retains the latest checksum-verified complete kit.
 
 ## Manage regional maps
 
-System -> Manage resources provides Available, Local, and Updates views. Available keeps the world hierarchy visible in a left browser while the selected region's details stay on the right. China contains 34 independent province-level units; the synchronized global directory adds more than 550 Geofabrik country/region packs. Geographic headings are navigation only, never bundled downloads. Jiangsu, Anhui, Shanghai, and Zhejiang are installed and rendered together by default; the region shortcuts only focus the camera and do not hide the other installed packs.
+System -> Manage resources provides Available, Local, and Updates views. Available keeps the world hierarchy visible in a left browser while the selected region's details stay on the right. China contains 34 independent province-level units; the synchronized global directory adds more than 550 Geofabrik country/region packs. Geographic headings are navigation only, never bundled downloads. Jiangsu and Anhui are currently installed and rendered together by default; region navigation changes only the camera focus and does not hide another installed pack.
 
 The map itself now carries the same ownership transition. A local Natural Earth world overview remains visible at low zoom; locating an uninstalled catalog region opens the exact offline package prompt. The WiFi shortcut provides offline-only, OpenStreetMap Standard, and OpenFreeMap choices, reports the source actually rendering plus current local coverage, and falls back from OSM to OpenFreeMap to the local overview as needed. Online tiles are never bulk-cached or treated as owned data.
 
@@ -177,7 +186,7 @@ Rendered OSM places, POIs, roads, water, peaks, parks, and buildings are clickab
 | `data/maintenance/` | Maintenance settings, queue state, worker heartbeat, job history, and logs |
 | `data/media/` | Content-addressed personal image files |
 | `backups/` | Database and media recovery points |
-| `offline-kit/` | Generated checksum-protected disconnected recovery packages (latest two retained) |
+| `offline-kit/` | Generated checksum-protected disconnected recovery packages (latest verified kit retained) |
 | `scripts/` | Rebuild, migrate, backup, restore, health, and smoke-test scripts |
 
 ## Documentation

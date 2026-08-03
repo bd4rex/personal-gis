@@ -1,0 +1,149 @@
+schema_name: GIS_P OSM Details
+schema_description: Rich offline OSM point-of-interest attributes paired with each regional basemap.
+attribution: '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+version: 1
+is_overlay: true
+
+args:
+  osm_local_path:
+    description: Regional OSM PBF to process
+    default: /data/raw/osm/region.osm.pbf
+  maxzoom: 16
+  render_maxzoom: 16
+  force: true
+
+sources:
+  osm:
+    type: osm
+    local_path: '${ args.osm_local_path }'
+
+definitions:
+  poi_filter: &poi_filter
+    amenity: __any__
+    shop: __any__
+    tourism: __any__
+    historic: __any__
+    leisure: __any__
+    railway: [station, halt, tram_stop, subway_entrance]
+    public_transport: __any__
+    highway: [services, rest_area, bus_stop, motorway_junction]
+    natural: [peak, spring, cave_entrance, beach, viewpoint]
+    office: __any__
+    craft: __any__
+    man_made: [lighthouse, tower, water_tower, pier]
+
+  poi_min_zoom: &poi_min_zoom
+    default_value: 14
+    overrides:
+      12:
+        amenity: [hospital, university, college, bus_station]
+        railway: [station]
+        tourism: [museum, attraction, theme_park, zoo]
+        natural: [peak]
+      13:
+        amenity: [clinic, pharmacy, school, police, fire_station, fuel, parking, marketplace, place_of_worship]
+        shop: [supermarket, convenience, mall, department_store]
+        tourism: [hotel, motel, hostel, viewpoint, information]
+        public_transport: [station, platform]
+        highway: [services, rest_area, bus_stop]
+        historic: __any__
+
+  poi_attributes: &poi_attributes
+    - key: category
+      type: match_key
+    - key: subclass
+      type: match_value
+    - key: name
+      coalesce:
+        - tag_value: name:zh
+        - tag_value: name
+        - tag_value: brand
+    - { key: name_zh, tag_value: 'name:zh' }
+    - { key: name_en, tag_value: 'name:en' }
+    - { key: brand, tag_value: brand }
+    - { key: operator, tag_value: operator }
+    - { key: opening_hours, tag_value: opening_hours }
+    - key: phone
+      coalesce:
+        - tag_value: phone
+        - tag_value: contact:phone
+    - key: website
+      coalesce:
+        - tag_value: website
+        - tag_value: contact:website
+    - { key: cuisine, tag_value: cuisine }
+    - { key: wheelchair, tag_value: wheelchair }
+    - { key: toilets_wheelchair, tag_value: 'toilets:wheelchair' }
+    - { key: fee, tag_value: fee }
+    - { key: access, tag_value: access }
+    - { key: ref, tag_value: ref }
+    - { key: ele, tag_value: ele }
+    - { key: description, tag_value: description }
+    - { key: wikipedia, tag_value: wikipedia }
+    - { key: wikidata, tag_value: wikidata }
+    - { key: addr_full, tag_value: 'addr:full' }
+    - { key: addr_province, tag_value: 'addr:province' }
+    - { key: addr_city, tag_value: 'addr:city' }
+    - { key: addr_district, tag_value: 'addr:district' }
+    - { key: addr_street, tag_value: 'addr:street' }
+    - { key: addr_housenumber, tag_value: 'addr:housenumber' }
+
+layers:
+  - id: poi_detail
+    buffer: 8
+    features:
+      - source: osm
+        geometry: point
+        include_when: *poi_filter
+        min_zoom: *poi_min_zoom
+        attributes: *poi_attributes
+      - source: osm
+        geometry: polygon_point_on_surface
+        include_when: *poi_filter
+        min_zoom: *poi_min_zoom
+        attributes: *poi_attributes
+      - source: osm
+        geometry: line_midpoint
+        include_when: *poi_filter
+        min_zoom: *poi_min_zoom
+        attributes: *poi_attributes
+
+examples:
+  - name: hospital with contact details
+    input:
+      source: osm
+      geometry: point
+      tags:
+        amenity: hospital
+        name: Test Hospital
+        opening_hours: 24/7
+        contact:phone: 12345
+        wheelchair: yes
+    output:
+      - layer: poi_detail
+        geometry: point
+        min_zoom: 12
+        tags:
+          category: amenity
+          subclass: hospital
+          name: Test Hospital
+          opening_hours: 24/7
+          phone: 12345
+          wheelchair: yes
+  - name: supermarket area
+    input:
+      source: osm
+      geometry: polygon
+      tags:
+        shop: supermarket
+        name: Test Market
+        website: https://example.test/
+    output:
+      - layer: poi_detail
+        geometry: point
+        min_zoom: 13
+        tags:
+          category: shop
+          subclass: supermarket
+          name: Test Market
+          website: https://example.test/

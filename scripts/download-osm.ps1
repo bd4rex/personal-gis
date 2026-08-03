@@ -8,18 +8,6 @@ $items = @(
     Dir = "raw\osm\china"
     Pbf = "https://download.openstreetmap.fr/extracts/asia/china-latest.osm.pbf"
     State = "https://download.openstreetmap.fr/extracts/asia/china.state.txt"
-  },
-  @{
-    Name = "jiangsu"
-    Dir = "raw\osm\china\jiangsu"
-    Pbf = "https://download.openstreetmap.fr/extracts/asia/china/jiangsu-latest.osm.pbf"
-    State = "https://download.openstreetmap.fr/extracts/asia/china/jiangsu.state.txt"
-  },
-  @{
-    Name = "anhui"
-    Dir = "raw\osm\china\anhui"
-    Pbf = "https://download.openstreetmap.fr/extracts/asia/china/anhui-latest.osm.pbf"
-    State = "https://download.openstreetmap.fr/extracts/asia/china/anhui.state.txt"
   }
 )
 

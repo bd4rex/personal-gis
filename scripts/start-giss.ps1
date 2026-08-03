@@ -69,8 +69,21 @@ if (-not $nominatimPasswordLine -or $nominatimPasswordLine.Substring("NOMINATIM_
   throw "NOMINATIM_PASSWORD must contain at least 20 characters."
 }
 
+$valhallaPathLine = Get-Content $envFile | Where-Object { $_ -match '^VALHALLA_DATA_PATH=' } | Select-Object -First 1
+$valhallaDataPath = if ($valhallaPathLine) {
+  $configuredPath = $valhallaPathLine.Substring("VALHALLA_DATA_PATH=".Length).Trim()
+  if ([IO.Path]::IsPathRooted($configuredPath)) {
+    [IO.Path]::GetFullPath($configuredPath)
+  }
+  else {
+    [IO.Path]::GetFullPath((Join-Path $services $configuredPath))
+  }
+}
+else {
+  Join-Path $root "products\routing\valhalla"
+}
 $advancedReady = (Test-Path -LiteralPath (Join-Path $root "raw\osm\china\giss-core-latest.osm.pbf") -PathType Leaf) -and
-  (Test-Path -LiteralPath (Join-Path $root "products\routing\valhalla\giss-core-latest.osm.pbf") -PathType Leaf) -and
+  (Test-Path -LiteralPath (Join-Path $valhallaDataPath "giss-core-latest.osm.pbf") -PathType Leaf) -and
   (Test-Path -LiteralPath (Join-Path $root "products\encyclopedia\wikipedia_zh_all_mini_2026-05.zim") -PathType Leaf)
 $profileArguments = if ($advancedReady) { @("--profile", "advanced") } else { @() }
 

@@ -371,3 +371,12 @@ Four recovery defects were found and fixed during the proof:
 - Changed the map's first frame to start with the left side panel collapsed and inert. The shared side-panel state function now keeps animation, keyboard focus, ARIA state, toggle icon, coverage detection, and programmatic panel opening synchronized.
 - Rebuilt the API image and corrected the resource-console browser fixtures to expect the four truly installed independent province packs instead of a stale five-row assumption.
 - Split shared-index readiness into coverage completeness and exact scope freshness. The active four provinces remain searchable/routable when an older index contains harmless extra Germany coverage, while the resource manager still requires a rebuild; an index missing any enabled pack remains blocked.
+
+## 2026-08-03: storage ownership and shared-index retention
+
+- Rebuilt Nominatim and Valhalla from the two installed Jiangsu/Anhui packs, validated the candidates, atomically activated them, and removed the former Germany-inclusive search and routing indexes only after a new disconnected recovery kit passed every SHA256 check.
+- Added resumable late-stage shared-index activation, active-mount-aware version pruning, dynamic validation points, compact Valhalla tar-only retention, and startup detection that follows the active `VALHALLA_DATA_PATH` pointer.
+- Expanded recovery schema v4 to snapshot Nominatim and OSM Carto, include OSM Carto source provenance, restore its external volume before startup, and retain one verified complete kit by default.
+- Removed obsolete Germany, Monaco, Shanghai, Zhejiang, and legacy duplicate province sources. The legacy OSM download entry now maintains only the shared China snapshot so it cannot recreate a second Jiangsu/Anhui source tree.
+- Removed unmounted historical PostGIS volumes, obsolete images, and renewable build cache. After filesystem trim, compacted the Docker VHDX from 140.81 GiB to 24.51 GiB, then restarted all eight containers and passed health plus the complete functional smoke suite.
+- Corrected the functional smoke test to compare temporary record counts against the database baseline instead of assuming a fixed amount of pre-existing personal data.

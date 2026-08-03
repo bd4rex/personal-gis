@@ -76,6 +76,30 @@ if ($kitInfo.nominatimIndexIncluded) {
   if ($LASTEXITCODE -ne 0) { throw "Restoring the Nominatim index failed." }
 }
 
+if ($kitInfo.osmCartoIncluded) {
+  $cartoArchive = Join-Path $kit ([string]$kitInfo.osmCartoArchive).Replace('/', '\')
+  if (-not (Test-Path -LiteralPath $cartoArchive -PathType Leaf)) {
+    throw "OSM Carto database archive is missing: $cartoArchive"
+  }
+  $cartoVolume = "giss_osm_carto_data"
+  docker volume inspect $cartoVolume *> $null
+  if ($LASTEXITCODE -eq 0) {
+    $entryCount = ((docker run --rm -v "${cartoVolume}:/target:ro" `
+      postgis/postgis@sha256:1d95a92144c40198b46908fd92ac365e85d35eaf31bfc36f06c2c09a090c0538 `
+      sh -c 'find /target -mindepth 1 -maxdepth 1 | head -1 | wc -l') -join "").Trim()
+    if ($entryCount -ne "0") { throw "Refusing to overwrite non-empty Docker volume: $cartoVolume" }
+  }
+  else {
+    docker volume create $cartoVolume | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Creating the OSM Carto recovery volume failed." }
+  }
+  Write-Host "Restoring the offline OSM Carto database..."
+  docker run --rm -v "${cartoVolume}:/target" -v "${dockerDirectory}:/backup:ro" `
+    postgis/postgis@sha256:1d95a92144c40198b46908fd92ac365e85d35eaf31bfc36f06c2c09a090c0538 `
+    tar -C /target -xzf "/backup/$([IO.Path]::GetFileName($cartoArchive))"
+  if ($LASTEXITCODE -ne 0) { throw "Restoring the OSM Carto database failed." }
+}
+
 & (Join-Path $target "scripts\start-giss.ps1") -NoBuild
 $backupRoot = Join-Path $target "backups"
 $latestBackup = Get-ChildItem -LiteralPath $backupRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
