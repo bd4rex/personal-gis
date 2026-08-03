@@ -240,6 +240,6 @@ volumes:
   giss_postgis_data:
   giss_osm_carto_data:
     external: true
-    name: giss_osm_carto_data
+    name: ${OSM_CARTO_VOLUME_NAME:-giss_osm_carto_data}
   giss_nominatim_data:
     name: ${NOMINATIM_VOLUME_NAME:-services_giss_nominatim_data}

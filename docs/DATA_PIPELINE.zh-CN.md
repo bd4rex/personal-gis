@@ -29,13 +29,13 @@ flowchart LR
 
 每个省、国家或地区是独立安装单元。地理分组只用于导航，不生成组合包。更新会先刷新可信上游状态；源序列未变化时禁止重复“更新”，需要重新生成时使用“重建”。
 
-本快照中通过校验并已激活的独立区域包是江苏和安徽：主 PMTiles 分别约 415.0 MiB 和 330.9 MiB，高细节叠加分别约 22.5 MiB 和 9.7 MiB。仅有 `.staged.pmtiles` 的构建候选不算已安装；必须通过校验并原子替换活动归档与 manifest 后才进入本地资源清单。
+本快照中通过校验并已激活的独立区域包是江苏、安徽和山东。仅有 `.staged.pmtiles` 的构建候选不算已安装；必须通过校验并原子替换活动归档与 manifest 后才进入本地资源清单。
 
 ## 本地 OSM Carto 流程
 
 ```mermaid
 flowchart LR
-  Installed["已安装江苏/安徽源"] --> Merge["共享 Carto PBF"]
+  Installed["全部已安装且启用的区域源"] --> Merge["共享 Carto PBF"]
   Merge --> Import["osm2pgsql 导入候选数据库"]
   External["水面、Natural Earth 等外部数据"] --> Import
   Import --> Render["Mapnik / mod_tile"]
@@ -43,7 +43,7 @@ flowchart LR
   Health --> Active["活动 OSM Carto 服务"]
 ```
 
-`build-osm-carto.ps1` 可以续建中断的外部数据和数据库后处理。活动地图在候选渲染器健康前继续服务。数据库放在外部 Docker 卷，瓦片缓存位于 `data/osm-carto-tiles`，二者都纳入恢复包规则。
+`build-osm-carto.ps1` 使用蓝绿候选卷。活动地图在候选渲染器健康且每个区域都能生成大于空白阈值的瓦片前继续服务。水域、冰盖和 Natural Earth 边界从 `raw/osm/carto/external` 本地归档导入，SHA256 写入产品清单。数据库放在外部 Docker 卷，瓦片缓存位于 `data/osm-carto-tiles`，二者都纳入恢复包规则。
 
 ## 轻量离线参考搜索
 
@@ -65,6 +65,8 @@ flowchart LR
 ```
 
 共享能力源只包含当前启用范围。候选版本按顺序构建以控制 16 GiB 主机内存；活动搜索和路线在构建期间继续工作。验收成功后更新 `.env` 指针并保留一个历史版本；失败或取消不改变活动版本。
+
+验收不只检查进程健康：Valhalla 必须在每个已启用区域中心附近返回真实路线；Nominatim、轻量参考索引、天气和航海的输入 ID 与源 SHA256 必须和已启用区域集合完全一致。
 
 HGT 数据用于路线海拔、点查询、Terrarium 地形和浏览器等高线。百科与旅行指南下载支持续传，校验精确 SHA256 后原子安装。天气和全球目录按短周期刷新；大型地图、索引和知识库只允许显式任务。
 

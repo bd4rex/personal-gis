@@ -42,7 +42,7 @@ http://localhost:8080/resources.html
 | Resource lifecycle | Global catalog, install/update/rebuild/verify/disable/rollback/remove jobs, and storage accounting |
 | Recovery | Versioned database migrations, daily backups, portable exports, and disconnected recovery kits |
 
-Jiangsu and Anhui are the current local map and shared-index scope. The catalog contains all 34 Chinese province-level units and more than 550 Geofabrik country or regional packages. The catalog describes what can be acquired; only verified local products count as installed.
+Jiangsu, Anhui, and Shandong are the current local map and shared-index scope. Regional derivative resources are derived from every installed and enabled package rather than a hard-coded province list. The catalog contains all 34 Chinese province-level units and more than 550 Geofabrik country or regional packages; only verified local products count as installed.
 
 ## Runtime architecture
 

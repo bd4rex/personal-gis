@@ -565,6 +565,9 @@ function renderPackResources(pack) {
   const job = maintenanceJobFor(pack.id);
   const covered = new Set(state.resourceInventory?.capabilityPackIds || []);
   const capabilityReady = covered.has(pack.id);
+  const osmCartoReady = new Set(state.resourceInventory?.osmCartoPackIds || []).has(pack.id);
+  const weatherReady = new Set(state.resourceInventory?.weatherPackIds || []).has(pack.id);
+  const nauticalReady = new Set(state.resourceInventory?.nauticalPackIds || []).has(pack.id);
   const terrainReady = new Set(state.resourceInventory?.terrainPackIds || []).has(pack.id);
   const standardSize = pack.installed ? formatBytes(Number(pack.bytes)) : formatEstimateRange(pack.estimatedInstallGiB, " GB");
   const standardStatus = pack.installed
@@ -609,6 +612,11 @@ function renderPackResources(pack) {
     </div>`;
   const rows = [
     standardMapRow,
+    `<div class="resource-type-row">
+      <span class="resource-row-icon"><i data-lucide="map"></i></span>
+      <span class="resource-row-copy"><strong>本地 OSM 原版</strong><span>OpenStreetMap Carto 栅格渲染数据库</span></span>
+      <span class="resource-row-status ${osmCartoReady ? "ready" : "partial"}">${osmCartoReady ? "已覆盖" : "待同步"}</span>
+    </div>`,
     renderResourceTypeRow(resourceType("road-map"), pack.installed ? { label: "样式就绪", tone: "ready" } : { label: "需先安装地图", tone: "partial" }, pack.installed),
     renderResourceTypeRow(resourceType("contours"), terrainReady ? { label: "本地 HGT 已覆盖", tone: "ready" } : { label: "该区域尚无高程数据", tone: "partial" }, terrainReady),
     `<div class="resource-type-row">
@@ -617,14 +625,22 @@ function renderPackResources(pack) {
       <span class="resource-row-status ${capabilityReady ? "ready" : "partial"}">${capabilityReady ? "已覆盖" : "添加后重建"}</span>
     </div>`,
     renderResourceTypeRow(resourceType("encyclopedia")),
-    renderResourceTypeRow(resourceType("weather")),
-    renderResourceTypeRow(resourceType("nautical"))
+    `<div class="resource-type-row">
+      <span class="resource-row-icon"><i data-lucide="cloud-sun"></i></span>
+      <span class="resource-row-copy"><strong>天气预报</strong><span>本区域代表城市的 Open-Meteo 七日快照</span></span>
+      <span class="resource-row-status ${weatherReady ? "ready" : "partial"}">${weatherReady ? "已覆盖" : "待同步"}</span>
+    </div>`,
+    `<div class="resource-type-row">
+      <span class="resource-row-icon"><i data-lucide="anchor"></i></span>
+      <span class="resource-row-copy"><strong>航海地图</strong><span>本区域 OSM 航标与航海参考要素</span></span>
+      <span class="resource-row-status ${nauticalReady ? "ready" : "partial"}">${nauticalReady ? "已覆盖" : "待同步"}</span>
+    </div>`
   ];
   return `${renderResourceBreadcrumb(resourceRegionPath(`pack:${pack.id}`))}
     <div class="resource-section-title">${escapeHtml(resourcePackName(pack))}<span>${escapeHtml(pack.description || "区域离线资源")}</span></div>
     ${facts}
     ${rows.join("")}
-    <p class="resource-command-note">构建与更新均在本机完成。标准地图安装后，可继续重建搜索、路线和地形索引，使该区域具备完整离线能力。</p>`;
+    <p class="resource-command-note">标准地图与丰富详情会随区域安装一起生成；OSM 原版、搜索路线、高程、天气和航海资源按已启用区域统一同步。</p>`;
 }
 
 function renderResourceSearchResults(query) {
@@ -874,7 +890,7 @@ function renderResourceUpdates() {
     ? `<div class="resource-job-strip"><i data-lucide="activity"></i><span><strong>${activeJobs.length} 个维护任务</strong><small>${runningJobs.length} 项执行中 · ${queuedJobs.length} 项等待</small></span></div>`
     : latestTerminal?.status === "failed" ? `<div class="resource-job-strip failed"><i data-lucide="circle-alert"></i><span><strong>最近任务失败</strong><small>${escapeHtml(latestTerminal.label)} · ${escapeHtml(latestTerminal.message || "请查看维护日志")}</small></span></div>`
       : latestTerminal?.status === "cancelled" ? `<div class="resource-job-strip cancelled"><i data-lucide="circle-x"></i><span><strong>最近任务已取消</strong><small>${escapeHtml(latestTerminal.label)} · 可在对应项目中重新加入队列</small></span></div>`
-        : latestTerminal ? `<div class="resource-job-strip complete"><i data-lucide="circle-check-big"></i><span><strong>最近完成</strong><small>${escapeHtml(latestTerminal.label)} · ${escapeHtml(new Date(latestTerminal.finishedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</small></span></div>` : "";
+        : latestTerminal ? `<div class="resource-job-strip complete"><i data-lucide="circle-check-big"></i><span><strong>最近完成</strong><small>${escapeHtml(latestTerminal.label)} · ${escapeHtml(new Date(latestTerminal.finishedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Shanghai" }))}</small></span></div>` : "";
   return `<div class="resource-update-toolbar">
       <div class="resource-update-summary"><strong>${updates.length} 项需要处理</strong><span class="resource-worker-state ${workerOnline ? "online" : ""}">${workerOnline ? "本机维护服务运行中" : "本机维护服务未运行"}</span></div>
       <div class="resource-update-actions">
@@ -2519,7 +2535,7 @@ function addOfflineReferenceLayers() {
       minzoom: Number(localOsmCarto.minZoom) || 0,
       maxzoom: Number(localOsmCarto.maxZoom) || 20,
       bounds: localOsmCarto.bounds,
-      attribution: `<a href="${escapeHtml(localOsmCarto.copyrightUrl || "https://www.openstreetmap.org/copyright")}" target="_blank" rel="noreferrer">${escapeHtml(localOsmCarto.attribution || "© OpenStreetMap contributors · OpenStreetMap Carto")}</a>`
+      attribution: `<a href="${escapeHtml(localOsmCarto.copyrightUrl || "https://www.openstreetmap.org/copyright")}" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a> · <a href="${escapeHtml(localOsmCarto.styleUrl || "https://github.com/gravitystorm/openstreetmap-carto")}" target="_blank" rel="noreferrer">OpenStreetMap Carto</a>`
     });
     map.addLayer({
       id: "local-osm-carto-raster",
@@ -4207,9 +4223,13 @@ async function init() {
     maxBounds: state.catalog.limits.maxBounds,
     localIdeographFontFamily: "Microsoft YaHei, SimHei, sans-serif",
     style: generated.style,
-    attributionControl: true
+    attributionControl: false
   });
 
+  state.map.addControl(new maplibregl.AttributionControl({
+    compact: true,
+    customAttribution: '<a href="https://github.com/gravitystorm/openstreetmap-carto" target="_blank" rel="noreferrer">OpenStreetMap Carto</a>'
+  }), "bottom-right");
   state.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
   state.map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "bottom-right");
   state.map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");

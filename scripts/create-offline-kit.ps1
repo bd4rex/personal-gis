@@ -89,7 +89,6 @@ foreach ($dataset in @($catalog.datasets)) {
   $manifestFile = [IO.Path]::GetFileName([string]$dataset.manifestUrl)
   $productRelative = Join-Path "products\tiles\pmtiles" $productFile
   $manifestRelative = Join-Path "products\tiles\pmtiles" $manifestFile
-  $sourceRelative = ([string]$dataset.sourceFile).Replace('/', '\')
   $productPath = Join-Path $root $productRelative
   $manifestPath = Join-Path $root $manifestRelative
   $productExists = Test-Path -LiteralPath $productPath -PathType Leaf
@@ -102,6 +101,7 @@ foreach ($dataset in @($catalog.datasets)) {
     throw "Regional pack $($dataset.id) is partially installed; both PMTiles and manifest are required."
   }
   $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  $sourceRelative = ([string]$manifest.source.file).Replace('/', '\')
   $detailsRelative = if ($manifest.details.file) { ([string]$manifest.details.file).Replace('/', '\') } else { $null }
   if (-not $detailsRelative -or -not (Test-Path -LiteralPath (Join-Path $root $detailsRelative) -PathType Leaf)) {
     throw "Regional pack $($dataset.id) is missing its rich-detail PMTiles companion."

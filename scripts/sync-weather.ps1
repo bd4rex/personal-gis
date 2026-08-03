@@ -1,54 +1,112 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "catalog-utils.ps1")
+$catalog = Get-GissExpandedCatalog -Root $root
 $directory = Join-Path $root "products\weather"
+$locationCache = Join-Path $directory "location-cache"
+$runtime = Join-Path $root "runtime\weather-locations"
+$packStatePath = Join-Path $root "data\maintenance\map-pack-state.json"
+$image = "giss-osmium:1"
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
-$locations = @(
-  @{ province = "江苏"; name = "南京"; latitude = 32.0603; longitude = 118.7969 },
-  @{ province = "江苏"; name = "无锡"; latitude = 31.4912; longitude = 120.3119 },
-  @{ province = "江苏"; name = "徐州"; latitude = 34.2044; longitude = 117.2858 },
-  @{ province = "江苏"; name = "常州"; latitude = 31.8107; longitude = 119.9741 },
-  @{ province = "江苏"; name = "苏州"; latitude = 31.2989; longitude = 120.5853 },
-  @{ province = "江苏"; name = "南通"; latitude = 31.9802; longitude = 120.8943 },
-  @{ province = "江苏"; name = "连云港"; latitude = 34.5967; longitude = 119.2216 },
-  @{ province = "江苏"; name = "淮安"; latitude = 33.6104; longitude = 119.0153 },
-  @{ province = "江苏"; name = "盐城"; latitude = 33.3477; longitude = 120.1633 },
-  @{ province = "江苏"; name = "扬州"; latitude = 32.3942; longitude = 119.4129 },
-  @{ province = "江苏"; name = "镇江"; latitude = 32.1878; longitude = 119.4250 },
-  @{ province = "江苏"; name = "泰州"; latitude = 32.4555; longitude = 119.9231 },
-  @{ province = "江苏"; name = "宿迁"; latitude = 33.9630; longitude = 118.2752 },
-  @{ province = "安徽"; name = "合肥"; latitude = 31.8206; longitude = 117.2272 },
-  @{ province = "安徽"; name = "芜湖"; latitude = 31.3525; longitude = 118.4331 },
-  @{ province = "安徽"; name = "蚌埠"; latitude = 32.9163; longitude = 117.3897 },
-  @{ province = "安徽"; name = "淮南"; latitude = 32.6255; longitude = 116.9999 },
-  @{ province = "安徽"; name = "马鞍山"; latitude = 31.6705; longitude = 118.5068 },
-  @{ province = "安徽"; name = "淮北"; latitude = 33.9558; longitude = 116.7983 },
-  @{ province = "安徽"; name = "铜陵"; latitude = 30.9454; longitude = 117.8121 },
-  @{ province = "安徽"; name = "安庆"; latitude = 30.5429; longitude = 117.0635 },
-  @{ province = "安徽"; name = "黄山"; latitude = 29.7147; longitude = 118.3376 },
-  @{ province = "安徽"; name = "滁州"; latitude = 32.3016; longitude = 118.3171 },
-  @{ province = "安徽"; name = "阜阳"; latitude = 32.8901; longitude = 115.8142 },
-  @{ province = "安徽"; name = "宿州"; latitude = 33.6461; longitude = 116.9642 },
-  @{ province = "安徽"; name = "六安"; latitude = 31.7349; longitude = 116.5077 },
-  @{ province = "安徽"; name = "亳州"; latitude = 33.8446; longitude = 115.7786 },
-  @{ province = "安徽"; name = "池州"; latitude = 30.6648; longitude = 117.4916 },
-  @{ province = "安徽"; name = "宣城"; latitude = 30.9407; longitude = 118.7588 }
-)
-Write-Host "Refreshing weather snapshots for $($locations.Count) cities..."
+
+function Assert-NativeSuccess([string]$Operation) {
+  if ($LASTEXITCODE -ne 0) { throw "$Operation failed with exit code $LASTEXITCODE." }
+}
+
+$disabledPackIds = @()
+if (Test-Path -LiteralPath $packStatePath -PathType Leaf) {
+  $packState = Get-Content -Raw -LiteralPath $packStatePath | ConvertFrom-Json
+  $disabledPackIds = @($packState.disabledPackIds | ForEach-Object { [string]$_ })
+}
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker was not found on PATH." }
+$imageReady = [bool](docker image ls -q $image)
+if ($imageReady) {
+  docker run --rm --entrypoint jq $image --version *> $null
+  $imageReady = $LASTEXITCODE -eq 0
+}
+if (-not $imageReady) {
+  docker build -t $image (Join-Path $root "services\tools\osmium") | Out-Host
+  Assert-NativeSuccess "Building the Osmium/JQ helper image"
+}
+New-Item -ItemType Directory -Force -Path $directory, $locationCache, $runtime | Out-Null
+
+$installedInputs = @()
+$locations = New-Object System.Collections.Generic.List[object]
+foreach ($dataset in @($catalog.datasets)) {
+  $id = [string]$dataset.id
+  if ($disabledPackIds -contains $id) { continue }
+  $product = Join-Path $root "products\tiles\pmtiles\$id.pmtiles"
+  $manifestPath = Join-Path $root "products\tiles\pmtiles\$id.manifest.json"
+  if (-not (Test-Path -LiteralPath $product -PathType Leaf) -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
+  $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  $sourceRelative = ([string]$manifest.source.file).Replace('/', '\')
+  $source = Join-Path $root $sourceRelative
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Weather source is missing for ${id}: $source" }
+  $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash.ToLowerInvariant()
+  if ($sourceHash -ne ([string]$manifest.source.sha256).ToLowerInvariant()) { throw "Weather source hash does not match $id manifest." }
+  $installedInputs += [pscustomobject][ordered]@{
+    id = $id
+    sha256 = $sourceHash
+    bytes = (Get-Item -LiteralPath $source).Length
+    sourceUpdatedAt = [string]$manifest.source.updatedAt
+  }
+
+  $cacheName = "$id.$($sourceHash.Substring(0, 12)).json"
+  $cachePath = Join-Path $locationCache $cacheName
+  if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+    $filtered = Join-Path $runtime "$id.osm.pbf"
+    $sequence = Join-Path $runtime "$id.geojsonseq"
+    $relativeSource = $source.Substring($root.Length + 1).Replace('\', '/')
+    try {
+      docker run --rm -v "${root}:/data" $image tags-filter "/data/$relativeSource" n/place=city `
+        -o "/data/runtime/weather-locations/$id.osm.pbf" --overwrite
+      Assert-NativeSuccess "Extracting weather cities from $id"
+      docker run --rm -v "${root}:/data" $image export "/data/runtime/weather-locations/$id.osm.pbf" `
+        -f geojsonseq -o "/data/runtime/weather-locations/$id.geojsonseq" --overwrite
+      Assert-NativeSuccess "Exporting weather cities from $id"
+      $jsonLines = & docker run --rm --entrypoint jq -v "${root}:/data" $image --seq -s `
+        --arg regionId $id --arg regionName ([string]$dataset.shortName) `
+        --from-file /data/scripts/weather-locations.jq "/data/runtime/weather-locations/$id.geojsonseq"
+      Assert-NativeSuccess "Selecting representative weather cities for $id"
+      $json = (($jsonLines -join "`n") -replace '^[\x00-\x1f]+', '').Trim()
+      if (-not $json) { throw "No representative weather cities were produced for $id." }
+      [IO.File]::WriteAllText($cachePath, $json, $utf8NoBom)
+    }
+    finally {
+      Remove-Item -LiteralPath $filtered, $sequence -Force -ErrorAction SilentlyContinue
+    }
+  }
+  $regionalLocations = [object[]](Get-Content -Raw -LiteralPath $cachePath | ConvertFrom-Json)
+  if ($regionalLocations.Count -lt 1) {
+    $bounds = @($dataset.bounds | ForEach-Object { [double]$_ })
+    $regionalLocations = @([pscustomobject]@{
+      regionId = $id
+      province = [string]$dataset.shortName
+      name = [string]$dataset.shortName
+      latitude = ($bounds[1] + $bounds[3]) / 2
+      longitude = ($bounds[0] + $bounds[2]) / 2
+      population = 0
+    })
+  }
+  foreach ($location in $regionalLocations) { [void]$locations.Add($location) }
+}
+if ($installedInputs.Count -lt 1 -or $locations.Count -lt 1) { throw "No enabled installed map regions are available for weather." }
+
+Write-Host "Refreshing weather snapshots for $($locations.Count) cities in $($installedInputs.Count) enabled regions..."
 $responses = New-Object System.Collections.Generic.List[object]
 $sourceUrls = New-Object System.Collections.Generic.List[string]
 for ($offset = 0; $offset -lt $locations.Count; $offset += 10) {
   $end = [math]::Min($locations.Count - 1, $offset + 9)
   $batch = @($locations[$offset..$end])
-  $latitudes = (($batch | ForEach-Object { [string]$_['latitude'] }) -join ',')
-  $longitudes = (($batch | ForEach-Object { [string]$_['longitude'] }) -join ',')
+  $latitudes = (($batch | ForEach-Object { ([double]$_.latitude).ToString([Globalization.CultureInfo]::InvariantCulture) }) -join ',')
+  $longitudes = (($batch | ForEach-Object { ([double]$_.longitude).ToString([Globalization.CultureInfo]::InvariantCulture) }) -join ',')
   $url = "https://api.open-meteo.com/v1/forecast?latitude=$latitudes&longitude=$longitudes&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation,wind_speed_10m,wind_direction_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max&timezone=Asia%2FShanghai&forecast_days=7"
   [void]$sourceUrls.Add($url)
   $rawResponse = Invoke-RestMethod -Uri $url -TimeoutSec 60
-  $batchResponses = @($rawResponse)
-  Write-Host "  batch $offset-$end returned $($batchResponses.Count) locations"
-  foreach ($response in $batchResponses) { [void]$responses.Add($response) }
+  foreach ($response in @($rawResponse)) { [void]$responses.Add($response) }
 }
 if ($responses.Count -ne $locations.Count) { throw "Open-Meteo returned $($responses.Count) locations; expected $($locations.Count)." }
+
 $features = for ($index = 0; $index -lt $locations.Count; $index++) {
   $location = $locations[$index]
   $weather = $responses[$index]
@@ -64,8 +122,9 @@ $features = for ($index = 0; $index -lt $locations.Count; $index++) {
   }
   [ordered]@{
     type = "Feature"
-    id = "$($location.province)-$($location.name)"
+    id = "$($location.regionId)-$($location.name)"
     properties = [ordered]@{
+      regionId = $location.regionId
       province = $location.province
       name = $location.name
       observedAt = $weather.current.time
@@ -88,17 +147,22 @@ $payload = [ordered]@{
   attribution = "Weather data by Open-Meteo.com (CC BY 4.0)"
   features = @($features)
 }
-New-Item -ItemType Directory -Force -Path $directory | Out-Null
 $target = Join-Path $directory "latest.geojson"
 [IO.File]::WriteAllText($target, ($payload | ConvertTo-Json -Depth 10), $utf8NoBom)
 $manifest = [ordered]@{
-  schemaVersion = 1
+  schemaVersion = 2
   generatedAt = $payload.generatedAt
+  inputs = $installedInputs
   sourceUrls = @($sourceUrls)
   locations = $locations.Count
   bytes = (Get-Item -LiteralPath $target).Length
   sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLowerInvariant()
   license = "CC BY 4.0"
 }
-[IO.File]::WriteAllText((Join-Path $directory "weather.manifest.json"), ($manifest | ConvertTo-Json -Depth 5), $utf8NoBom)
-Get-Item -LiteralPath $target | Select-Object FullName, Length, LastWriteTime
+[IO.File]::WriteAllText((Join-Path $directory "weather.manifest.json"), ($manifest | ConvertTo-Json -Depth 8), $utf8NoBom)
+
+$activeCacheNames = @($installedInputs | ForEach-Object { "$($_.id).$($_.sha256.Substring(0, 12)).json" })
+Get-ChildItem -LiteralPath $locationCache -File -Filter '*.json' -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -notin $activeCacheNames } |
+  Remove-Item -Force
+Get-Item -LiteralPath $target, (Join-Path $directory "weather.manifest.json") | Select-Object FullName, Length, LastWriteTime

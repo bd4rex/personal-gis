@@ -37,8 +37,6 @@ foreach ($dataset in @($catalog.datasets)) {
     $skippedCount++
     continue
   }
-  $sourceRelative = ([string]$dataset.sourceFile).Replace('/', '\')
-  $sourcePath = Join-Path $root $sourceRelative
   $productPath = Join-Path $root "products\tiles\pmtiles\$($dataset.id).pmtiles"
   $packManifestPath = Join-Path $root "products\tiles\pmtiles\$($dataset.id).manifest.json"
   $productExists = Test-Path -LiteralPath $productPath -PathType Leaf
@@ -50,10 +48,12 @@ foreach ($dataset in @($catalog.datasets)) {
   if ($productExists -ne $manifestExists) {
     throw "Regional pack $($dataset.id) is partially installed; both PMTiles and manifest are required."
   }
+  $packManifest = Get-Content -Raw -LiteralPath $packManifestPath | ConvertFrom-Json
+  $sourceRelative = ([string]$packManifest.source.file).Replace('/', '\')
+  $sourcePath = Join-Path $root $sourceRelative
   if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     throw "Regional source is missing for $($dataset.id): $sourcePath"
   }
-  $packManifest = Get-Content -Raw -LiteralPath $packManifestPath | ConvertFrom-Json
   $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
   if ($sourceHash -ne ([string]$packManifest.source.sha256).ToLowerInvariant()) {
     throw "Regional source hash does not match the $($dataset.id) manifest."

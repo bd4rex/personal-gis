@@ -1,15 +1,15 @@
 # Rebuild From Scratch
 
-> English | [简体中文](REBUILD.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+> English | [简体中文](REBUILD.zh-CN.md) · Snapshot `2026-08-04T02:45:00+08:00`
 
-This procedure reconstructs the Jiangsu/Anhui MVP from repository files and upstream open data.
+This procedure reconstructs the region-extensible system from repository files and upstream open data. Jiangsu, Anhui, and Shandong are the currently installed experimental scope.
 
 ## Prerequisites
 
 - Windows 10/11 with PowerShell 5.1 or newer;
 - Docker Desktop with Linux containers;
 - at least 8GB available memory for a build and 16GB total host memory; 32GB is recommended;
-- at least 80GB free disk for the current two-region system; keep 150GB free when rebuilding shared indexes and creating a new recovery kit in the same maintenance window;
+- at least 100GB free disk for the current three-province system; keep 180GB free when retaining blue-green databases, rebuilding shared indexes, and creating a recovery kit in the same maintenance window;
 - internet access during the download phase.
 
 The normal runtime works offline after images, browser assets, and data are present.
@@ -74,6 +74,7 @@ The legacy download entry maintains the shared China snapshot and replication me
 D:\GISS\region-pack.cmd Plan -PackId jiangsu
 D:\GISS\region-pack.cmd Build -PackId jiangsu
 D:\GISS\region-pack.cmd Build -PackId anhui
+D:\GISS\region-pack.cmd Build -PackId shandong
 ```
 
 Each command extracts and builds one independently versioned OpenMapTiles PMTiles archive through zoom 16:
@@ -81,6 +82,7 @@ Each command extracts and builds one independently versioned OpenMapTiles PMTile
 ```text
 D:\GISS\products\tiles\pmtiles\jiangsu.pmtiles
 D:\GISS\products\tiles\pmtiles\anhui.pmtiles
+D:\GISS\products\tiles\pmtiles\shandong.pmtiles
 ```
 
 On current hardware each province can take tens of minutes. A final file replaces the previous product only after size/header checks and manifest creation. Build every required province explicitly with `region-pack.cmd`.
@@ -107,7 +109,7 @@ Build the familiar local OSM Carto renderer as a separate resumable operation:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\GISS\scripts\build-osm-carto.ps1
 ```
 
-Its database and tile cache are validated independently and are included in complete recovery kits.
+Its blue-green candidate automatically discovers installed and enabled regions, renders a non-empty validation tile in every region, and reuses verified local Carto external-data archives. Its database and tile cache are included in complete recovery kits.
 
 ## 8. Verify
 

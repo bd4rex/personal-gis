@@ -86,7 +86,7 @@ RESOURCE_CLASSIFICATIONS: dict[str, dict[str, str]] = {
     "terrain": {"resourceType": "elevation-grid", "storageClass": "primary", "scope": "regional", "validationPolicy": "hgt-name-and-byte-size"},
     "encyclopedia": {"resourceType": "encyclopedia", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-service-health"},
     "overview-map": {"resourceType": "overview-map", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-sha256"},
-    "osm-carto-renderer": {"resourceType": "standard-map", "storageClass": "rendered", "scope": "jiangsu-anhui", "validationPolicy": "manifest-and-service-health"},
+    "osm-carto-renderer": {"resourceType": "standard-map", "storageClass": "rendered", "scope": "installed-regions", "validationPolicy": "source-manifest-and-blue-green-service-health"},
     "weather": {"resourceType": "weather", "storageClass": "primary", "scope": "regional", "validationPolicy": "manifest-size-sha256-and-expiry"},
     "travel-guide": {"resourceType": "travel-guide", "storageClass": "primary", "scope": "global", "validationPolicy": "manifest-size-and-service-health"},
     "nautical": {"resourceType": "nautical", "storageClass": "primary", "scope": "regional", "validationPolicy": "manifest-size-and-sha256"},
@@ -108,7 +108,7 @@ RESOURCE_MANAGEMENT: dict[str, dict[str, str | bool]] = {
     "geocoder": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
     "routing": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
     "overview-map": {"managementMode": "maintenance", "managementResourceId": "overview-map", "managementLabel": "重新获取"},
-    "osm-carto-renderer": {"managementMode": "system", "managementLabel": "本地 OSM 原版"},
+    "osm-carto-renderer": {"managementMode": "maintenance", "managementResourceId": "osm-carto", "managementLabel": "同步已安装区域", "managementHeavy": True},
     "weather": {"managementMode": "maintenance", "managementResourceId": "weather", "managementLabel": "刷新天气"},
     "nautical": {"managementMode": "maintenance", "managementResourceId": "nautical", "managementLabel": "重建"},
     "encyclopedia": {"managementMode": "maintenance", "managementResourceId": "encyclopedia", "managementLabel": "重新获取", "managementHeavy": True},
@@ -356,19 +356,28 @@ def capability_manifest() -> dict[str, Any] | None:
 
 def shared_index_scope_state() -> dict[str, Any]:
     manifest = capability_manifest() or {}
-    indexed_ids = {
-        str(item.get("id")) for item in manifest.get("inputs", [])
+    indexed_sources = {
+        str(item.get("id")): str(item.get("sha256") or "")
+        for item in manifest.get("inputs", [])
         if isinstance(item, dict) and item.get("id")
     }
+    indexed_ids = set(indexed_sources)
     disabled_ids = set(map_pack_preferences()["disabledPackIds"])
-    enabled_ids = set()
+    enabled_sources: dict[str, str] = {}
     for dataset in map_catalog().get("datasets", []):
         pack_id = str(dataset.get("id") or "")
         product_name = Path(str(dataset.get("url") or "")).name
         manifest_name = Path(str(dataset.get("manifestUrl") or "")).name
         if pack_id and pack_id not in disabled_ids and product_name and manifest_name:
             if (MAP_PACK_ROOT / product_name).is_file() and (MAP_PACK_ROOT / manifest_name).is_file():
-                enabled_ids.add(pack_id)
+                pack_manifest = read_json_file(MAP_PACK_ROOT / manifest_name) or {}
+                source = pack_manifest.get("source") if isinstance(pack_manifest.get("source"), dict) else {}
+                enabled_sources[pack_id] = str(source.get("sha256") or "")
+    enabled_ids = set(enabled_sources)
+    mismatched_ids = {
+        pack_id for pack_id, source_hash in enabled_sources.items()
+        if not source_hash or indexed_sources.get(pack_id) != source_hash
+    }
     validation = read_json_file(SHARED_INDEX_STATE_PATH) or {}
     verified = (
         validation.get("strategy") == "blue-green"
@@ -376,7 +385,8 @@ def shared_index_scope_state() -> dict[str, Any]:
         and bool(validation.get("active"))
         and bool(validation.get("lastBuildMapAvailable"))
     )
-    complete = bool(manifest) and enabled_ids.issubset(indexed_ids)
+    missing_ids = (enabled_ids - indexed_ids) | mismatched_ids
+    complete = bool(manifest) and not missing_ids
     return {
         "complete": complete,
         "current": complete and indexed_ids == enabled_ids,
@@ -384,7 +394,8 @@ def shared_index_scope_state() -> dict[str, Any]:
         "validation": validation,
         "enabledPackIds": sorted(enabled_ids),
         "indexedPackIds": sorted(indexed_ids),
-        "missingPackIds": sorted(enabled_ids - indexed_ids),
+        "missingPackIds": sorted(missing_ids),
+        "mismatchedPackIds": sorted(mismatched_ids),
         "extraPackIds": sorted(indexed_ids - enabled_ids),
     }
 
@@ -405,6 +416,7 @@ DEFAULT_MAINTENANCE_SETTINGS = {
 
 STATIC_MAINTENANCE_RESOURCES = {
     "shared-capabilities": {"label": "搜索与路线共享索引", "heavy": True},
+    "osm-carto": {"label": "本地 OSM 原版渲染", "heavy": True},
     "world-region-catalog": {"label": "全球区域目录", "heavy": False},
     "overview-map": {"label": "全球概览地图", "heavy": False},
     "weather": {"label": "天气快照", "heavy": False},
@@ -437,6 +449,44 @@ def maintenance_jobs() -> list[dict[str, Any]]:
     active = [job for job in ordered if job.get("status") in {"queued", "running"}]
     completed = [job for job in ordered if job.get("status") not in {"queued", "running"}][:100]
     return sorted(active + completed, key=lambda item: str(item.get("requestedAt", "")), reverse=True)
+
+
+def queue_lightweight_region_derivatives(trigger: str) -> list[str]:
+    queued: list[str] = []
+    active_resource_ids = {
+        str(job.get("resourceId"))
+        for job in maintenance_jobs()
+        if job.get("status") in {"queued", "running"}
+    }
+    for resource_id, label in (("weather", "天气快照"), ("nautical", "航海参考")):
+        if resource_id in active_resource_ids:
+            continue
+        now = datetime.now().astimezone().isoformat()
+        job_id = uuid.uuid4().hex
+        write_json_file(MAINTENANCE_ROOT / "jobs" / f"{job_id}.json", {
+            "id": job_id,
+            "resourceId": resource_id,
+            "action": "update",
+            "operation": resource_id,
+            "label": label,
+            "heavy": False,
+            "priority": 60,
+            "automatic": True,
+            "trigger": trigger,
+            "attempts": 0,
+            "maxAttempts": 3,
+            "nextAttemptAt": now,
+            "cancelRequested": False,
+            "status": "queued",
+            "message": "启用区域范围已变化，正在同步轻量派生资源",
+            "requestedAt": now,
+            "startedAt": None,
+            "finishedAt": None,
+            "exitCode": None,
+            "logFile": f"logs/{job_id}.log",
+        })
+        queued.append(resource_id)
+    return queued
 
 
 def maintenance_file_tail(relative_path: str) -> str:
@@ -535,9 +585,10 @@ def maintenance_activity(job: dict[str, Any], log: str, stage: str) -> dict[str,
 def maintenance_progress(job: dict[str, Any], queue_position: int | None = None) -> dict[str, Any]:
     status = str(job.get("status") or "")
     if status == "queued":
+        operation_steps = {"region-pack": 5, "shared-capabilities": 5, "osm-carto": 4, "nautical": 4}
         return {
             "kind": "queued", "percent": 0, "stage": "等待本机维护服务",
-            "queuePosition": queue_position, "step": 0, "steps": 5 if job.get("operation") == "region-pack" else 1,
+            "queuePosition": queue_position, "step": 0, "steps": operation_steps.get(str(job.get("operation")), 1),
         }
     if status == "succeeded":
         return {"kind": "complete", "percent": 100, "stage": "维护完成", "queuePosition": None, "step": 1, "steps": 1}
@@ -575,6 +626,27 @@ def maintenance_progress(job: dict[str, Any], queue_position: int | None = None)
         return {
             "kind": "indeterminate", "percent": None, "stage": "准备后台候选索引",
             "queuePosition": None, "step": 0, "steps": 5, "serviceContinuity": True,
+        }
+    if job.get("operation") == "osm-carto":
+        log = maintenance_log_text(job)
+        markers = re.findall(r"OSM_CARTO_STAGE\s+(\d+)/(\d+)\s+(IMPORT|EXTERNAL|VERIFY|ACTIVATE)", log)
+        if markers:
+            step_value, steps_value, phase = markers[-1]
+            step = int(step_value)
+            labels = {
+                "IMPORT": "后台导入已安装区域",
+                "EXTERNAL": "补齐 OSM Carto 外部图层",
+                "VERIFY": "验证候选渲染器与区域瓦片",
+                "ACTIVATE": "切换已验证的 OSM 原版数据库",
+            }
+            return {
+                "kind": "staged", "percent": {1: 12, 2: 68, 3: 84, 4: 96}.get(step),
+                "stage": labels.get(phase, "重建 OSM 原版渲染"), "queuePosition": None,
+                "step": step, "steps": int(steps_value), "serviceContinuity": True,
+            }
+        return {
+            "kind": "indeterminate", "percent": None, "stage": "准备 OSM Carto 候选数据库",
+            "queuePosition": None, "step": 0, "steps": 4, "serviceContinuity": True,
         }
     if job.get("operation") == "nautical":
         log = maintenance_log_text(job)
@@ -1699,6 +1771,7 @@ def update_map_pack_activation(pack_id: str, payload: MapPackActivationInput) ->
     if not payload.enabled and pack["enabled"] and len(enabled_installed) <= 1:
         raise HTTPException(status_code=409, detail="At least one installed map pack must remain enabled")
     set_map_pack_enabled(pack_id, payload.enabled)
+    queued_derivatives = queue_lightweight_region_derivatives(f"map-pack-activation:{pack_id}")
     updated = map_pack_state(
         next(item for item in catalog["datasets"] if str(item.get("id")) == pack_id),
         disabled_pack_ids=set(map_pack_preferences()["disabledPackIds"]),
@@ -1706,6 +1779,7 @@ def update_map_pack_activation(pack_id: str, payload: MapPackActivationInput) ->
     return {
         **updated,
         "indexRebuildRequired": True,
+        "queuedDerivatives": queued_derivatives,
         "message": "渲染状态已更新；搜索与路线索引需要按新的启用范围重建",
     }
 
@@ -1897,14 +1971,6 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         if isinstance(item, dict) and item.get("id")
     }
     datasets_by_id = {str(item.get("id")): item for item in catalog["datasets"]}
-    capability_pack_ids = set(capability_ids)
-    for capability_id in capability_ids:
-        dataset = datasets_by_id.get(capability_id, {})
-        capability_pack_ids.update(
-            str(member.get("id"))
-            for member in dataset.get("members", [])
-            if isinstance(member, dict) and member.get("id")
-        )
     installed_ids = {str(pack["id"]) for pack in enabled_installed_packs}
     upstream_cache = upstream_source_states(catalog, installed_ids, check_upstream, MAINTENANCE_ROOT / "upstream-state.json")
     upstream_sources = upstream_cache.get("sources") or {}
@@ -1936,6 +2002,22 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         for item in capability.get("inputs", [])
         if isinstance(item, dict) and item.get("id")
     }
+    capability_pack_ids: set[str] = set()
+    for capability_id in capability_ids:
+        source_matches = (
+            installed_source_hashes.get(capability_id) == capability_source_hashes.get(capability_id)
+            if capability_source_hashes
+            else capability_id in installed_ids
+        )
+        if not source_matches:
+            continue
+        capability_pack_ids.add(capability_id)
+        dataset = datasets_by_id.get(capability_id, {})
+        capability_pack_ids.update(
+            str(member.get("id"))
+            for member in dataset.get("members", [])
+            if isinstance(member, dict) and member.get("id")
+        )
 
     usage_paths = {
         "map": MAP_PACK_ROOT, "osm": OSM_RESOURCE_ROOT, "routing": ROUTING_RESOURCE_ROOT,
@@ -2090,6 +2172,25 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     overview_manifest = read_json_file(OVERVIEW_RESOURCE_ROOT / "overview.manifest.json") or {}
     osm_carto_manifest = read_json_file(OSM_CARTO_MANIFEST_PATH) or {}
     osm_carto_database_bytes = int((osm_carto_manifest.get("storage") or {}).get("databaseBytes", 0) or 0)
+    osm_carto_source = osm_carto_manifest.get("source") if isinstance(osm_carto_manifest.get("source"), dict) else {}
+    osm_carto_source_hashes = {
+        str(item.get("id")): str(item.get("sha256") or "")
+        for item in osm_carto_source.get("inputs", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    osm_carto_region_ids = {
+        str(item) for item in osm_carto_source.get("regions", []) if item
+    }
+    osm_carto_inputs_current = (
+        osm_carto_source_hashes == installed_source_hashes
+        if osm_carto_source_hashes
+        else osm_carto_region_ids == installed_ids and bool(osm_carto_region_ids)
+    )
+    osm_carto_current_region_ids = {
+        pack_id
+        for pack_id, source_hash in osm_carto_source_hashes.items()
+        if installed_source_hashes.get(pack_id) == source_hash
+    } if osm_carto_source_hashes else (osm_carto_region_ids & installed_ids)
     world_catalog = read_json_file(WORLD_REGION_CATALOG_PATH) or {}
     encyclopedia_state = declared_file_state(
         ENCYCLOPEDIA_RESOURCE_ROOT,
@@ -2107,6 +2208,12 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
         "latest.geojson",
         hash_small_files=True,
     )
+    weather_source_hashes = {
+        str(item.get("id")): str(item.get("sha256") or "")
+        for item in weather_manifest.get("inputs", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    weather_inputs_current = weather_source_hashes == installed_source_hashes
     nautical_state = declared_file_state(
         NAUTICAL_RESOURCE_ROOT,
         nautical_manifest,
@@ -2199,10 +2306,10 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
                 {"id": "terrain", "name": "地形与等高线", "icon": "mountain-snow", "bytes": elevation_usage["bytes"], "files": elevation_usage["files"], "status": "ready" if elevation_valid else ("warning" if elevation_files else "missing"), "subtitle": f"{elevation_usage['files']} 个 HGT 格网 · " + ("尺寸有效" if elevation_valid else "需要校验")},
                 {"id": "encyclopedia", "name": "离线百科", "icon": "book-open", "bytes": encyclopedia_usage_value["bytes"], "files": encyclopedia_usage_value["files"], "status": "ready" if encyclopedia_state["valid"] and services_available["encyclopedia"] else ("warning" if encyclopedia_manifest else "missing"), "subtitle": f"中文维基百科 {encyclopedia_manifest.get('snapshot', '--')} · " + ("清单有效，服务在线" if encyclopedia_state["valid"] and services_available["encyclopedia"] else "资源或服务需检查")},
                 {"id": "overview-map", "name": "全球概览地图", "icon": "globe-2", "bytes": overview_usage["bytes"], "files": overview_usage["files"], "status": "ready" if overview_valid else ("warning" if overview_usage["files"] else "missing"), "subtitle": f"{overview_manifest.get('snapshot', 'Natural Earth')} · " + ("校验通过" if overview_valid else "需要校验")},
-                {"id": "osm-carto-renderer", "name": "本地 OSM 原版渲染", "icon": "map", "bytes": osm_carto_database_bytes + osm_carto_cache_usage["bytes"], "files": osm_carto_cache_usage["files"] + (1 if osm_carto_manifest else 0), "status": "ready" if osm_carto_manifest and services_available["osm-carto"] else ("warning" if osm_carto_manifest else "missing"), "subtitle": "江苏、安徽 · OpenStreetMap Carto · " + ("服务在线" if services_available["osm-carto"] else "等待导入或启动")},
-                {"id": "weather", "name": "天气快照", "icon": "cloud-sun", "bytes": weather_usage["bytes"], "files": weather_usage["files"], "status": "ready" if weather_state["valid"] else ("warning" if weather_manifest else "missing"), "subtitle": f"Open-Meteo · {weather_manifest.get('generatedAt', '--')} · " + ("校验通过" if weather_state["valid"] else "需要校验")},
+                {"id": "osm-carto-renderer", "name": "本地 OSM 原版渲染", "icon": "map", "bytes": osm_carto_database_bytes + osm_carto_cache_usage["bytes"], "files": osm_carto_cache_usage["files"] + (1 if osm_carto_manifest else 0), "status": "ready" if osm_carto_manifest and osm_carto_inputs_current and services_available["osm-carto"] else ("warning" if osm_carto_manifest else "missing"), "subtitle": f"{len(osm_carto_region_ids)} 个区域 · OpenStreetMap Carto · " + ("来源一致，服务在线" if osm_carto_inputs_current and services_available["osm-carto"] else "需要同步已安装区域")},
+                {"id": "weather", "name": "天气快照", "icon": "cloud-sun", "bytes": weather_usage["bytes"], "files": weather_usage["files"], "status": "ready" if weather_state["valid"] and weather_inputs_current else ("warning" if weather_manifest else "missing"), "subtitle": f"{len(weather_source_hashes)} 个区域 · Open-Meteo · {weather_manifest.get('generatedAt', '--')} · " + ("来源一致，校验通过" if weather_state["valid"] and weather_inputs_current else "需要同步已安装区域")},
                 {"id": "travel-guide", "name": "旅行指南", "icon": "landmark", "bytes": travel_usage_value["bytes"], "files": travel_usage_value["files"], "status": "ready" if travel_state["valid"] and services_available["encyclopedia"] else ("warning" if travel_manifest else "missing"), "subtitle": f"中文维基导游 {travel_manifest.get('snapshot', '--')} · " + ("清单有效，服务在线" if travel_state["valid"] and services_available["encyclopedia"] else "资源或服务需检查")},
-                {"id": "nautical", "name": "航海参考", "icon": "anchor", "bytes": nautical_usage["bytes"], "files": nautical_usage["files"], "status": "ready" if nautical_state["valid"] else ("warning" if nautical_manifest else "missing"), "subtitle": f"{len(nautical_source_hashes)} 个区域 · {nautical_manifest.get('features', 0)} 个本地 OSM 航海地物 · " + ("校验通过" if nautical_state["valid"] else "需要校验")},
+                {"id": "nautical", "name": "航海参考", "icon": "anchor", "bytes": nautical_usage["bytes"], "files": nautical_usage["files"], "status": "ready" if nautical_state["valid"] and nautical_inputs_current else ("warning" if nautical_manifest else "missing"), "subtitle": f"{len(nautical_source_hashes)} 个区域 · {nautical_manifest.get('features', 0)} 个本地 OSM 航海地物 · " + ("来源一致，校验通过" if nautical_state["valid"] and nautical_inputs_current else "需要同步已安装区域")},
                 {"id": "tts", "name": "语音提示（TTS）", "icon": "volume-2", "bytes": 0, "files": 0, "status": "external", "subtitle": "Windows/浏览器运行时能力 · 不计入离线资源占用"},
             ],
         },
@@ -2322,16 +2429,30 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "command": "D:\\GISS\\sync-overview-resources.cmd",
         },
         {
+            "id": "osm-carto",
+            "name": "本地 OSM 原版渲染",
+            "type": "osm-carto",
+            "bytes": osm_carto_database_bytes + osm_carto_cache_usage["bytes"],
+            "installedVersion": osm_carto_manifest.get("generatedAt"),
+            "availableVersion": capability.get("generatedAt"),
+            "updateAvailable": not bool(osm_carto_manifest) or not osm_carto_inputs_current or not services_available["osm-carto"],
+            "statusKind": "missing" if not osm_carto_manifest else "rebuild" if not osm_carto_inputs_current else "repair" if not services_available["osm-carto"] else "current",
+            "reason": "OSM 原版渲染尚未安装" if not osm_carto_manifest else "已启用地图包集合或源数据摘要已变化，需要后台重建并切换" if not osm_carto_inputs_current else "渲染服务未就绪，需要修复" if not services_available["osm-carto"] else "OSM 原版渲染与已启用地图包来源一致",
+            "action": "update" if not bool(osm_carto_manifest) or not osm_carto_inputs_current or not services_available["osm-carto"] else None,
+            "heavy": True,
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\GISS\\scripts\\build-osm-carto.ps1",
+        },
+        {
             "id": "weather",
             "name": "天气快照",
             "type": "weather",
             "bytes": weather_usage["bytes"],
             "installedVersion": weather_manifest.get("generatedAt"),
             "availableVersion": datetime.now().astimezone().isoformat(),
-            "updateAvailable": not weather_state["valid"] or manifest_is_older_than(weather_manifest, 6),
-            "statusKind": "missing" if not weather_manifest else "repair" if not weather_state["valid"] else "refresh" if manifest_is_older_than(weather_manifest, 6) else "current",
-            "reason": "天气资源尚未安装" if not weather_manifest else "天气资源校验失败，需要重新获取" if not weather_state["valid"] else "天气快照已到刷新时间" if manifest_is_older_than(weather_manifest, 6) else "天气快照仍在有效期内",
-            "action": "update" if not weather_state["valid"] or manifest_is_older_than(weather_manifest, 6) else None,
+            "updateAvailable": not weather_state["valid"] or not weather_inputs_current or manifest_is_older_than(weather_manifest, 6),
+            "statusKind": "missing" if not weather_manifest else "repair" if not weather_state["valid"] else "rebuild" if not weather_inputs_current else "refresh" if manifest_is_older_than(weather_manifest, 6) else "current",
+            "reason": "天气资源尚未安装" if not weather_manifest else "天气资源校验失败，需要重新获取" if not weather_state["valid"] else "已启用地图包集合或源数据摘要已变化，需要同步天气点" if not weather_inputs_current else "天气快照已到刷新时间" if manifest_is_older_than(weather_manifest, 6) else "天气快照仍在有效期内",
+            "action": "update" if not weather_state["valid"] or not weather_inputs_current or manifest_is_older_than(weather_manifest, 6) else None,
             "heavy": False,
             "command": "D:\\GISS\\sync-weather.cmd",
         },
@@ -2405,17 +2526,22 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             latitude = int(match.group(2)) * (-1 if match.group(1).upper() == "S" else 1)
             longitude = int(match.group(4)) * (-1 if match.group(3).upper() == "W" else 1)
             terrain_tiles.append((longitude, latitude, longitude + 1, latitude + 1))
+    terrain_tile_origins = {(int(west), int(south)) for west, south, _, _ in terrain_tiles}
+    terrain_coverage = {}
+    for pack in enabled_installed_packs:
+        dataset = datasets_by_id.get(str(pack["id"]), {})
+        bounds = dataset.get("bounds", [])
+        if len(bounds) != 4:
+            continue
+        center_longitude = (float(bounds[0]) + float(bounds[2])) / 2
+        center_latitude = (float(bounds[1]) + float(bounds[3])) / 2
+        center_tile = (math.floor(center_longitude), math.floor(center_latitude))
+        terrain_coverage[str(pack["id"])] = {
+            "centerReady": center_tile in terrain_tile_origins,
+            "centerTile": f"{'N' if center_tile[1] >= 0 else 'S'}{abs(center_tile[1]):02d}{'E' if center_tile[0] >= 0 else 'W'}{abs(center_tile[0]):03d}",
+        }
     terrain_pack_ids = sorted(
-        str(dataset["id"])
-        for dataset in catalog["datasets"]
-        if len(dataset.get("bounds", [])) == 4
-        and any(
-            float(dataset["bounds"][0]) < east
-            and float(dataset["bounds"][2]) > west
-            and float(dataset["bounds"][1]) < north
-            and float(dataset["bounds"][3]) > south
-            for west, south, east, north in terrain_tiles
-        )
+        pack_id for pack_id, coverage in terrain_coverage.items() if coverage["centerReady"]
     )
 
     legacy_packages = legacy_map_packages(catalog, packs)
@@ -2454,7 +2580,17 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
             "legacySourceBytes": legacy_source_usage["bytes"],
         },
         "capabilityPackIds": sorted(capability_pack_ids),
+        "osmCartoPackIds": sorted(osm_carto_current_region_ids) if osm_carto_manifest and services_available["osm-carto"] else [],
+        "weatherPackIds": sorted(
+            pack_id for pack_id, source_hash in weather_source_hashes.items()
+            if weather_state["valid"] and installed_source_hashes.get(pack_id) == source_hash
+        ),
+        "nauticalPackIds": sorted(
+            pack_id for pack_id, source_hash in nautical_source_hashes.items()
+            if nautical_state["valid"] and installed_source_hashes.get(pack_id) == source_hash
+        ),
         "terrainPackIds": terrain_pack_ids,
+        "terrainCoverage": terrain_coverage,
         "localGroups": local_groups,
         "caches": caches,
         "legacyPackages": legacy_packages,
