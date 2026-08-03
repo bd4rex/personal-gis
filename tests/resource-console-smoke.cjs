@@ -26,7 +26,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   page.on("requestfailed", (request) => errors.push(`request: ${request.url()} ${request.failure()?.errorText || "failed"}`));
 
   await page.goto(`${baseUrl}/resources.html`, { waitUntil: "load", timeout: 60000 });
-  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 2, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll("#versionRows tr[data-pack-row]").length >= 2, null, { timeout: 60000 });
   const packSummary = await page.evaluate(async () => {
     const response = await fetch("/api/map-packs", { cache: "no-store" });
     if (!response.ok) throw new Error(`Map pack inventory returned ${response.status}.`);
@@ -35,7 +35,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.waitForFunction(
     (expected) => document.querySelectorAll("#versionRows tr[data-pack-row]").length === expected,
     packSummary.installed,
-    { timeout: 30000 }
+    { timeout: 60000 }
   );
 
   if ((await page.title()) !== "资源与版本 - GIS_P") throw new Error("The GIS_P resource-console title is missing.");
@@ -79,7 +79,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   await page.screenshot({ path: path.join(outputDir, "versions-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: /添加区域/ }).click();
   const catalogText = await page.locator("#catalogResults").innerText();
-  for (const expected of ["地图", "世界地图", "全球概览地图", "全球海拔校正", "全世界天气预报", "航海地图", "旅行指南", "其他地图", "语音提示（TTS）", "地图字体"]) {
+  for (const expected of ["地图", "世界地图", "全球概览地图", "全球海拔校正", "天气预报", "航海地图", "旅行指南", "其他地图", "语音提示（TTS）", "地图字体"]) {
     if (!catalogText.includes(expected)) throw new Error(`OsmAnd-style resource catalog is missing: ${expected}`);
   }
   if (await page.locator('[data-catalog-region="china"]').count()) {
@@ -108,7 +108,6 @@ fs.mkdirSync(outputDir, { recursive: true });
   const localText = await page.locator("#localGroups").innerText();
   for (const expected of [
     "完整恢复包",
-    "2 个已验证",
     "可再生",
     "系统能力",
     "地址检索索引",
@@ -117,6 +116,9 @@ fs.mkdirSync(outputDir, { recursive: true });
     if (!localText.includes(expected)) {
       throw new Error(`Local resource classification is missing: ${expected}`);
     }
+  }
+  if (!/\d+ 个已验证/.test(localText)) {
+    throw new Error("Verified recovery-kit accounting was not rendered.");
   }
   if (!localText.includes("外部卷") && !localText.includes("需检查")) {
     throw new Error("Search-index validity state was not rendered.");

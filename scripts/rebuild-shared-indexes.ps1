@@ -159,6 +159,26 @@ function Wait-ContainerEndpoint([string]$Container, [string]$Url, [int]$TimeoutM
   throw "$Label candidate did not become ready within $TimeoutMinutes minutes."
 }
 
+function Test-ValhallaCoverage([string]$Container, [object[]]$Points) {
+  foreach ($point in $Points) {
+    $payload = [ordered]@{
+      locations = @(
+        [ordered]@{ lat = [double]$point.latitude; lon = [double]$point.longitude },
+        [ordered]@{ lat = [double]$point.latitude + 0.02; lon = [double]$point.longitude + 0.03 }
+      )
+      costing = "auto"
+      units = "kilometers"
+    } | ConvertTo-Json -Depth 5 -Compress
+    $encoded = [uri]::EscapeDataString($payload)
+    $response = docker exec $Container curl -fsS --max-time 30 "http://127.0.0.1:8002/route?json=$encoded"
+    Assert-NativeSuccess "Testing Valhalla coverage for $($point.label)"
+    $route = ($response -join "") | ConvertFrom-Json
+    if (-not $route.trip -or @($route.trip.legs).Count -lt 1) {
+      throw "Valhalla returned no route for installed map pack $($point.id)."
+    }
+  }
+}
+
 function Wait-Healthy([string]$Container, [int]$TimeoutMinutes) {
   $attempts = [math]::Max(1, $TimeoutMinutes * 6)
   for ($attempt = 0; $attempt -lt $attempts; $attempt++) {
@@ -244,8 +264,10 @@ try {
     & docker @resumeValhallaArgs | Out-Null
     Assert-NativeSuccess "Starting the resumable Valhalla candidate"
     Wait-ContainerEndpoint $candidateValhallaContainer "http://127.0.0.1:8002/status" 20 "Valhalla"
+    Test-ValhallaCoverage $candidateValhallaContainer $validationPoints
     docker stop -t 30 $candidateValhallaContainer | Out-Null
     Assert-NativeSuccess "Stopping the resumable Valhalla candidate"
+    & (Join-Path $PSScriptRoot "prune-elevation-coverage.ps1") -RoutingRoot $candidateRouting
 
     $dotenv = Read-DotEnv
     if (-not $dotenv.ContainsKey("NOMINATIM_PASSWORD") -or -not $dotenv.NOMINATIM_PASSWORD) { throw "NOMINATIM_PASSWORD is missing from services/.env." }
@@ -289,9 +311,11 @@ try {
   & docker @valhallaArgs | Out-Null
   Assert-NativeSuccess "Starting the Valhalla candidate"
   Wait-ContainerEndpoint $candidateValhallaContainer "http://127.0.0.1:8002/status" $ValhallaTimeoutMinutes "Valhalla"
+  Test-ValhallaCoverage $candidateValhallaContainer $validationPoints
   if (-not (Test-Path -LiteralPath (Join-Path $candidateRouting "valhalla_tiles.tar") -PathType Leaf)) { throw "Valhalla candidate has no tile archive." }
   docker stop -t 30 $candidateValhallaContainer | Out-Null
   Assert-NativeSuccess "Stopping the validated Valhalla candidate"
+  & (Join-Path $PSScriptRoot "prune-elevation-coverage.ps1") -RoutingRoot $candidateRouting
   $looseTiles = Join-Path $candidateRouting "valhalla_tiles"
   if (Test-Path -LiteralPath $looseTiles -PathType Container) {
     Remove-Item -LiteralPath $looseTiles -Recurse -Force

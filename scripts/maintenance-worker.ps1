@@ -162,10 +162,51 @@ function Stop-JobCandidates {
     $containers = @(docker ps -aq --filter "label=giss.maintenance-job=$JobId" 2>$null)
     if ($containers.Count) { docker rm -f @containers *> $null }
     $volumes = @(docker volume ls -q --filter "label=giss.maintenance-job=$JobId" 2>$null)
-    if ($volumes.Count) { docker volume rm @volumes *> $null }
+    $mountedVolumes = @()
+    foreach ($container in @(docker ps -aq 2>$null)) {
+      $mountedVolumes += @(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' $container 2>$null)
+    }
+    $safeVolumes = @($volumes | Where-Object { $_ -and $_ -notin $mountedVolumes })
+    if ($safeVolumes.Count) { docker volume rm @safeVolumes *> $null }
   }
   catch {
     # Candidate cleanup is best-effort; the active map must never be stopped here.
+  }
+}
+
+function Add-RegionFollowUpJobs {
+  param([string]$PackId)
+  $resources = @(
+    [pscustomobject]@{ Id = "weather"; Label = "天气快照" },
+    [pscustomobject]@{ Id = "nautical"; Label = "航海参考" }
+  )
+  foreach ($resource in $resources) {
+    if (Get-ActiveJob -ResourceId $resource.Id) { continue }
+    $jobId = [Guid]::NewGuid().ToString("N")
+    $now = [DateTimeOffset]::Now.ToString("o")
+    $job = [ordered]@{
+      id = $jobId
+      resourceId = $resource.Id
+      action = "update"
+      operation = $resource.Id
+      label = $resource.Label
+      heavy = $false
+      priority = 60
+      automatic = $true
+      trigger = "region-pack:$PackId"
+      attempts = 0
+      maxAttempts = 3
+      nextAttemptAt = $now
+      cancelRequested = $false
+      status = "queued"
+      message = "启用区域范围已变化（$PackId），正在同步轻量派生资源"
+      requestedAt = $now
+      startedAt = $null
+      finishedAt = $null
+      exitCode = $null
+      logFile = "logs/$jobId.log"
+    }
+    Write-JsonFile -Path (Join-Path $jobsRoot "$jobId.json") -Value $job
   }
 }
 
@@ -221,6 +262,7 @@ function Get-JobCommand {
       return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "region-pack.ps1"); Parameters = $parameters }
     }
     "shared-capabilities" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "rebuild-shared-indexes.ps1"); Parameters = [ordered]@{ ConfirmRebuild = $true; MaintenanceJobId = [string]$Job.id } } }
+    "osm-carto" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "build-osm-carto.ps1"); Parameters = [ordered]@{ MaintenanceJobId = [string]$Job.id } } }
     "world-region-catalog" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-world-catalog.ps1"); Parameters = [ordered]@{} } }
     "overview-map" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-overview-resources.ps1"); Parameters = [ordered]@{} } }
     "weather" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-weather.ps1"); Parameters = [ordered]@{} } }
@@ -290,6 +332,9 @@ function Invoke-MaintenanceJob {
     Set-ObjectProperty -Value $Job -Name "nextAttemptAt" -PropertyValue $null
     if ($Job.operation -eq "region-pack" -and $Job.action -in @("build", "remove")) {
       Reset-PackPreference -PackId ([string]$Job.resourceId)
+    }
+    if ($Job.operation -eq "region-pack" -and $Job.action -in @("build", "update", "rebuild", "remove")) {
+      Add-RegionFollowUpJobs -PackId ([string]$Job.resourceId)
     }
     # Keep the last complete inventory readable while the UI starts a fresh
     # background scan after observing this job transition.

@@ -142,7 +142,15 @@ try {
     if ($localResourceIds -notcontains $required) { throw "Local resource inventory is missing $required." }
   }
   $weather = Invoke-RestMethod -Uri "$base/weather"
-  if (@($weather.features).Count -ne 29) { throw "Weather snapshot does not cover the 29 Jiangsu/Anhui cities." }
+  $weatherManifest = Get-Content (Join-Path $root "products\weather\weather.manifest.json") -Raw | ConvertFrom-Json
+  $enabledWeatherPackIds = @($installedPacks | Where-Object { $_.enabled } | ForEach-Object { $_.id } | Sort-Object)
+  $weatherInputIds = @($weatherManifest.inputs | ForEach-Object { $_.id } | Sort-Object)
+  if ($weatherManifest.schemaVersion -ne 2 -or @(Compare-Object $enabledWeatherPackIds $weatherInputIds).Count) {
+    throw "Weather inputs do not match the enabled installed map packs."
+  }
+  if (@($weather.features).Count -ne [int]$weatherManifest.locations -or @($weather.features).Count -lt $enabledWeatherPackIds.Count) {
+    throw "Weather snapshot feature coverage does not match its installed-region manifest."
+  }
   $nautical = Invoke-RestMethod -Uri "$base/nautical" -TimeoutSec 30
   if (@($nautical.features).Count -lt 1000) { throw "Nautical reference layer is unexpectedly sparse." }
   $nauticalManifest = Get-Content (Join-Path $root "products\nautical\nautical.manifest.json") -Raw | ConvertFrom-Json
@@ -158,6 +166,12 @@ try {
   if (-not $nauticalUpdate -or $nauticalUpdate.updateAvailable -or $nauticalUpdate.statusKind -ne "current") {
     throw "Nautical resource remains incorrectly marked for update after a successful build."
   }
+  foreach ($resourceId in @("weather", "osm-carto")) {
+    $resourceUpdate = @($resources.updateChecks | Where-Object { $_.id -eq $resourceId }) | Select-Object -First 1
+    if (-not $resourceUpdate -or $resourceUpdate.updateAvailable -or $resourceUpdate.statusKind -ne "current") {
+      throw "$resourceId remains incorrectly marked for update after a successful build."
+    }
+  }
   $overviewResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8080/assets/overview/gray-earth.jpg" -TimeoutSec 20
   if ($overviewResponse.StatusCode -ne 200 -or $overviewResponse.RawContentLength -lt 1MB) {
     throw "Global overview raster is unavailable."
@@ -168,6 +182,33 @@ try {
   $missingCapabilityPackIds = @($enabledInstalledPackIds | Where-Object { $capabilityProvinceIds -notcontains $_ })
   if ($missingCapabilityPackIds.Count) {
     throw "Shared capability coverage is missing enabled map packs: $($missingCapabilityPackIds -join ', ')."
+  }
+  $osmCartoPackIds = @($resources.osmCartoPackIds | Sort-Object)
+  $missingOsmCartoPackIds = @($enabledInstalledPackIds | Where-Object { $osmCartoPackIds -notcontains $_ })
+  if ($missingOsmCartoPackIds.Count) {
+    throw "OSM Carto coverage is missing enabled map packs: $($missingOsmCartoPackIds -join ', ')."
+  }
+  $nauticalPackIds = @($resources.nauticalPackIds | Sort-Object)
+  $missingNauticalPackIds = @($enabledInstalledPackIds | Where-Object { $nauticalPackIds -notcontains $_ })
+  if ($missingNauticalPackIds.Count) {
+    throw "Nautical coverage is missing enabled map packs: $($missingNauticalPackIds -join ', ')."
+  }
+  $weatherPackIds = @($resources.weatherPackIds | Sort-Object)
+  $missingWeatherPackIds = @($enabledInstalledPackIds | Where-Object { $weatherPackIds -notcontains $_ })
+  if ($missingWeatherPackIds.Count) {
+    throw "Weather coverage is missing enabled map packs: $($missingWeatherPackIds -join ', ')."
+  }
+  $terrainPackIds = @($resources.terrainPackIds | Sort-Object)
+  foreach ($coverage in @(
+    [pscustomobject]@{ name = "Shared capability"; ids = $capabilityProvinceIds },
+    [pscustomobject]@{ name = "OSM Carto"; ids = $osmCartoPackIds },
+    [pscustomobject]@{ name = "Nautical"; ids = $nauticalPackIds },
+    [pscustomobject]@{ name = "Weather"; ids = $weatherPackIds },
+    [pscustomobject]@{ name = "Terrain"; ids = $terrainPackIds }
+  )) {
+    if (@(Compare-Object $enabledInstalledPackIds @($coverage.ids)).Count) {
+      throw "$($coverage.name) coverage does not exactly match enabled installed map packs."
+    }
   }
 
   $capabilities = Invoke-RestMethod -Uri "$base/capabilities"

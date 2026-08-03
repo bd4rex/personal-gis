@@ -8,9 +8,9 @@
       "tileSize": 256,
       "minZoom": 0,
       "maxZoom": 20,
-      "bounds": [114.7, 29.25, 122.25, 35.45],
       "attribution": "© OpenStreetMap contributors · OpenStreetMap Carto",
-      "copyrightUrl": "https://www.openstreetmap.org/copyright"
+      "copyrightUrl": "https://www.openstreetmap.org/copyright",
+      "styleUrl": "https://github.com/gravitystorm/openstreetmap-carto"
     }
   },
   "onlineMaps": {
@@ -56,7 +56,7 @@
     { "id": "standard-map", "name": "标准地图", "icon": "map", "scope": "regional", "support": "ready", "delivery": "map-pack", "action": "standard-mode", "description": "完整道路、地名、地物与兴趣点" },
     { "id": "road-map", "name": "道路地图模式", "icon": "route", "scope": "regional", "support": "ready", "delivery": "style", "action": "road-mode", "description": "使用已安装矢量包的道路优先样式" },
     { "id": "contours", "name": "地形与等高线", "icon": "mountain-snow", "scope": "regional", "support": "partial", "inventoryId": "terrain", "delivery": "layer", "action": "contours", "description": "已下载 HGT 覆盖范围内的阴影与动态等高线" },
-    { "id": "weather", "name": "全世界天气预报", "icon": "umbrella", "scope": "global", "support": "ready", "inventoryId": "weather", "installResourceId": "weather", "delivery": "layer", "action": "weather", "description": "Open-Meteo 七日预报本地快照图层" },
+      { "id": "weather", "name": "天气预报", "icon": "umbrella", "scope": "regional", "support": "ready", "inventoryId": "weather", "installResourceId": "weather", "delivery": "layer", "action": "weather", "description": "按已安装区域生成的 Open-Meteo 七日预报本地快照图层" },
     { "id": "encyclopedia", "name": "离线百科", "icon": "book-open", "scope": "global", "support": "ready", "inventoryId": "encyclopedia", "installResourceId": "encyclopedia", "delivery": "library", "action": "encyclopedia", "description": "在本地 Kiwix 中打开中文维基百科" },
     { "id": "travel-guide", "name": "旅行指南", "icon": "landmark", "scope": "global", "support": "ready", "inventoryId": "travel-guide", "installResourceId": "travel-guide", "delivery": "library", "action": "travel-guide", "description": "在本地 Kiwix 中打开中文维基导游" },
     { "id": "nautical", "name": "航海地图", "icon": "anchor", "scope": "global", "support": "ready", "inventoryId": "nautical", "installResourceId": "nautical", "delivery": "layer", "action": "nautical", "description": "Natural Earth 海底地形与本地 OSM 航标图层" },

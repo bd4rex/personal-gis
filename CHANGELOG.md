@@ -8,6 +8,27 @@ This changelog documents user-visible development milestones. It follows the hum
 
 The repository had no tags or GitHub Releases before this file was introduced. The `M0.x` labels below are retrospective documentation labels. Commit hashes and timestamps are the source of truth; no historical releases are implied.
 
+## Unreleased — automatic regional strategy propagation
+
+### Added
+
+- Blue-green OSM Carto candidate volumes with non-empty tile validation for every enabled region.
+- Dynamic weather-location extraction, regional weather/nautical provenance, and elevation-coverage manifests.
+- Automatic lightweight weather and nautical follow-up jobs after regional build, update, removal, enable, or disable changes the active scope.
+
+### Fixed
+
+- Included Shandong in OSM Carto, shared search/routing, weather, nautical, and elevation coverage after its base package was installed.
+- Prevented whole-service health from hiding missing derivative coverage for newly installed regions.
+- Compared per-region source SHA256 values, not only region IDs, before declaring search, routing, Carto, weather, or nautical coverage current.
+- Resolved installed source paths from package manifests so later country and regional packages inherit the same pipelines.
+- Removed the obsolete Jiangsu/Anhui Carto merge and pruned 97 unrelated historical HGT grids from the new routing candidate.
+
+### Improved
+
+- Reused verified local Carto water, ice-sheet, and low-zoom boundary archives instead of downloading them for every regional expansion.
+- Added real Valhalla route checks for every enabled region and smoke-test assertions that derivative scopes match enabled packages.
+
 ## Documentation snapshot — 2026-08-03T23:12:23+08:00
 
 ### Added

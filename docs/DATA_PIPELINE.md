@@ -1,6 +1,6 @@
 # Data Pipeline
 
-> English | [简体中文](DATA_PIPELINE.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+> English | [简体中文](DATA_PIPELINE.zh-CN.md) · Snapshot `2026-08-04T02:45:00+08:00`
 
 ## Base-map flow
 
@@ -41,7 +41,7 @@ The script downloads:
 - matching replication state files;
 - catalogued `.poly` boundaries for the supported Chinese administrative regions.
 
-Jiangsu and Anhui are the validated installed packs in this documentation snapshot. A `.staged.pmtiles` file is a build candidate, not an installed pack, until validation succeeds and its active archive and manifest are atomically replaced.
+Jiangsu, Anhui, and Shandong are the validated installed packs in this documentation snapshot. A `.staged.pmtiles` file is a build candidate, not an installed pack, until validation succeeds and its active archive and manifest are atomically replaced.
 
 Every PBF first lands in a staging file. Osmium reads its metadata and checks references before the file replaces the active copy. The previous China/province PBF is retained as `.previous` when replaced.
 
@@ -85,7 +85,7 @@ Outputs:
 
 Planetiler is pinned by digest, receives a 6GB Java heap, and uses the OpenMapTiles profile with catalog bounds and maximum zoom 16.
 
-The generated archive must be larger than 10MB and begin with the seven-byte `PMTiles` signature. SHA256 is printed after replacement. A machine-readable manifest is written beside each archive with province identity, source timestamp/sequence, bounds, sizes, and hashes. The current active products are approximately 415.0 MiB for Jiangsu and 330.9 MiB for Anhui; their detail overlays are approximately 22.5 MiB and 9.7 MiB respectively.
+The generated archive must be larger than 10MB and begin with the seven-byte `PMTiles` signature. SHA256 is printed after replacement. A machine-readable manifest is written beside each archive with region identity, source timestamp/sequence, bounds, sizes, and hashes. Derivative pipelines discover every installed and enabled manifest instead of maintaining a separate hard-coded province list.
 
 The upstream China snapshot currently reports two missing way-node references. The generic build accepts an explicitly parsed count up to 100 and prints a warning; a larger count, an unrecognized check failure, a bad PMTiles header, or a hash/size mismatch stops replacement.
 

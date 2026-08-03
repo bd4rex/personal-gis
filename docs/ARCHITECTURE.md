@@ -1,12 +1,12 @@
 # Architecture
 
-> English | [简体中文](ARCHITECTURE.zh-CN.md) · Snapshot `2026-08-03T23:12:23+08:00`
+> English | [简体中文](ARCHITECTURE.zh-CN.md) · Snapshot `2026-08-04T02:45:00+08:00`
 
 ## Design goals
 
 1. Work without internet after data and images are downloaded.
 2. Keep personal places, tracks, notes, and media under local control.
-3. Treat the Jiangsu/Anhui MVP as a repeatable regional cell for a future global system.
+3. Propagate the Jiangsu/Anhui experiment automatically to every later province, country, or region through catalogs and manifests.
 4. Keep components replaceable: renderer, base map, database, geocoder, and router are separate concerns.
 
 ## Runtime topology
@@ -53,7 +53,7 @@ The resource inventory has two delivery paths. `GET /resources?cached=true` read
 
 `web/config/resource-catalog.json` provides the supported resource taxonomy. China points to 34 independent province datasets, while the generated `world-region-catalog.json` supplies the full Geofabrik continent/country/region hierarchy. Continents and the six Chinese geographic groups are presentation sections only; every downloadable row resolves to one physical pack and a concrete lifecycle command.
 
-A province is independently installed only after its PMTiles and manifest both pass validation; otherwise it is available, staged, or partially installed. Jiangsu and Anhui are the validated independently installed provinces in this documentation snapshot.
+A region is independently installed only after its PMTiles and manifest both pass validation; otherwise it is available, staged, or partially installed. Jiangsu, Anhui, and Shandong are validated and installed in this documentation snapshot.
 
 `GET /api/resources` is the local inventory boundary. It combines disk capacity, filesystem usage, PostGIS size, regional pack state, shared search/route coverage, recovery-kit usage, and semantic update checks. With `check_upstream=true`, the API compares installed source sequence/timestamp metadata with trusted provider state files and caches the result. The browser presents that information as **Available**, **Local**, and **Updates** views. Jobs can be queued, cancelled, or retried, while heavy index rebuilds remain explicit and never enter the regular automatic batch.
 
@@ -82,7 +82,9 @@ FastAPI is the write boundary. The browser does not receive database credentials
 
 ### Routing, terrain, and encyclopedia
 
-Valhalla and Nominatim consume `giss-core-latest.osm.pbf`, a manifest-tracked merge of all installed regional source PBFs from one China snapshot. They are optional Compose-profile services behind FastAPI adapters. The browser never depends on their native response formats or ports.
+Valhalla and Nominatim consume `giss-core-latest.osm.pbf`, a manifest-tracked merge of all installed and enabled regional source PBFs. They are optional Compose-profile services behind FastAPI adapters. The browser never depends on their native response formats or ports.
+
+Weather, nautical references, OSM Carto, Nominatim, Valhalla, and lightweight reference search record regional IDs and source SHA256 values in their manifests. Inventory checks compare those inputs per region, so a healthy service cannot conceal missing coverage after another package is installed.
 
 `POST /api/route` returns GeoJSON, a normalized summary, Chinese UI maneuver labels, and a sampled elevation profile for `auto`, `bicycle`, or `pedestrian`. A route is ephemeral until the user saves it, at which point it becomes an ordinary `app.tracks` record covered by personal backups.
 
@@ -100,7 +102,7 @@ SQL files under `services/postgis/migrations/` are ordered and recorded in `publ
 
 ## Map rendering
 
-The default **OSM Original** source is rendered locally by the `osm-carto` service from its own imported OSM database and tile cache. Its build pipeline stages the source, resumes external-data preparation, validates the candidate renderer, and keeps the existing map available until the replacement is healthy.
+The default **OSM Original** source is rendered locally by the `osm-carto` service from its own imported OSM database and tile cache. Its blue-green build imports every installed and enabled region into a candidate volume, renders a non-empty validation tile in each region, and keeps the existing map available until the replacement passes. Verified local water, ice-sheet, and low-zoom boundary archives are reused between expansions.
 
 The **Interactive Vector** source uses `web/src/map-style.js` to build an OSM-like MapLibre style from the local catalog. It includes landcover, land use, water, roads, rail, buildings, boundaries, labels, POIs, offline glyphs, and offline sprites. Two visual modes reuse the same data and layer IDs.
 

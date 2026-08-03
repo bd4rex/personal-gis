@@ -77,10 +77,16 @@ if ($kitInfo.nominatimIndexIncluded -and -not ($entries.Path -contains $kitInfo.
   throw "Offline-kit metadata references a missing Nominatim index archive."
 }
 if ($kitInfo.osmCartoIncluded) {
+  $cartoManifestPath = Join-Path $kit "payload\GISS\products\osm-carto\osm-carto.manifest.json"
+  if (-not (Test-Path -LiteralPath $cartoManifestPath -PathType Leaf)) {
+    throw "OSM Carto offline-kit manifest is missing."
+  }
+  $cartoManifest = Get-Content -Raw -LiteralPath $cartoManifestPath | ConvertFrom-Json
+  $cartoSource = "payload/GISS/$(([string]$cartoManifest.source.file).Replace('\', '/').TrimStart('/'))"
   foreach ($relative in @(
     [string]$kitInfo.osmCartoArchive,
     "payload/GISS/products/osm-carto/osm-carto.manifest.json",
-    "payload/GISS/raw/osm/carto/jiangsu-anhui.osm.pbf"
+    $cartoSource
   )) {
     if (-not $relative -or -not ($entries.Path -contains $relative)) {
       throw "OSM Carto offline-kit payload is incomplete: $relative"
