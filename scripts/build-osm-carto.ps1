@@ -13,6 +13,7 @@ $sourceManifest = Join-Path $root "raw\osm\carto\installed-regions.manifest.json
 $externalRoot = Join-Path $root "raw\osm\carto\external"
 $externalConfig = Join-Path $root "config\osm-carto\external-data.local.yml"
 $localImportScript = Join-Path $root "scripts\osm-carto-import-local.sh"
+$apacheConfig = Join-Path $root "services\osm-carto-apache.conf"
 $productRoot = Join-Path $root "products\osm-carto"
 $manifestPath = Join-Path $productRoot "osm-carto.manifest.json"
 $tileCache = Join-Path $root "data\osm-carto-tiles"
@@ -111,6 +112,16 @@ function Wait-RenderedTile([string]$Container, [string]$RegionId, [string]$Url, 
   throw "OSM Carto did not render a non-empty validation tile for $RegionId within $TimeoutMinutes minutes."
 }
 
+function Warm-RenderedBounds([string]$Container, [double[]]$Bounds, [int]$MinZoom = 5, [int]$MaxZoom = 8) {
+  Write-Host "Prewarming OSM Carto viewport tiles at zooms $MinZoom-$MaxZoom."
+  $longitude = ($Bounds[0] + $Bounds[2]) / 2
+  $latitude = ($Bounds[1] + $Bounds[3]) / 2
+  for ($zoom = $MinZoom; $zoom -le $MaxZoom; $zoom++) {
+    $tile = Get-TileCoordinate -Longitude $longitude -Latitude $latitude -Zoom $zoom
+    Wait-RenderedTile $Container "overview-z$zoom" "http://127.0.0.1/tile/$zoom/$($tile.x)/$($tile.y).png"
+  }
+}
+
 function Get-TileCoordinate([double]$Longitude, [double]$Latitude, [int]$Zoom) {
   $count = [math]::Pow(2, $Zoom)
   $latitude = [math]::Max(-85.05112878, [math]::Min(85.05112878, $Latitude))
@@ -147,7 +158,7 @@ $externalInputs = foreach ($name in $requiredExternalFiles) {
   }
 }
 $externalSignature = ($externalInputs | ForEach-Object { "$($_.file):$($_.sha256)" }) -join ':'
-foreach ($path in @($externalConfig, $localImportScript)) {
+foreach ($path in @($externalConfig, $localImportScript, $apacheConfig)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing local OSM Carto import support file: $path" }
 }
 
@@ -232,7 +243,8 @@ try {
     "run", "-d", "--name", $candidateContainer, "--shm-size", "1g",
     "--label", "giss.role=osm-carto-candidate", "--label", "giss.maintenance-job=$MaintenanceJobId",
     "-e", "THREADS=2", "-e", "ALLOW_CORS=enabled", "-e", "AUTOVACUUM=on", "-e", "TZ=Asia/Shanghai",
-    "-v", "${candidateVolume}:/data/database/", "-v", "${candidateCache}:/data/tiles/", $image, "run"
+    "-v", "${candidateVolume}:/data/database/", "-v", "${candidateCache}:/data/tiles/",
+    "-v", "${apacheConfig}:/etc/apache2/sites-available/000-default.conf:ro", $image, "run"
   )
   & docker @candidateArgs | Out-Null
   Assert-NativeSuccess "Starting the OSM Carto candidate renderer"
@@ -249,6 +261,14 @@ try {
     $tile = Get-TileCoordinate -Longitude $longitude -Latitude $latitude -Zoom 8
     Wait-RenderedTile $candidateContainer $id "http://127.0.0.1/tile/8/$($tile.x)/$($tile.y).png"
   }
+  $enabledDatasets = @($sourceState.scope | ForEach-Object { $datasets[[string]$_] })
+  $warmBounds = [double[]]@(
+    ($enabledDatasets | ForEach-Object { [double]$_.bounds[0] } | Measure-Object -Minimum).Minimum,
+    ($enabledDatasets | ForEach-Object { [double]$_.bounds[1] } | Measure-Object -Minimum).Minimum,
+    ($enabledDatasets | ForEach-Object { [double]$_.bounds[2] } | Measure-Object -Maximum).Maximum,
+    ($enabledDatasets | ForEach-Object { [double]$_.bounds[3] } | Measure-Object -Maximum).Maximum
+  )
+  Warm-RenderedBounds -Container $candidateContainer -Bounds $warmBounds
   docker rm -f $candidateContainer | Out-Null
 
   $manifest = [ordered]@{
@@ -282,6 +302,7 @@ try {
   Write-Host "OSM_CARTO_STAGE 4/4 ACTIVATE"
   Set-DotEnvValue "OSM_CARTO_VOLUME_NAME" $candidateVolume
   Get-ChildItem -LiteralPath $tileCache -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+  Get-ChildItem -LiteralPath $candidateCache -Force -ErrorAction Stop | Copy-Item -Destination $tileCache -Recurse -Force
   try {
     Invoke-Compose @("up", "-d", "--force-recreate", "osm-carto") "Activating the OSM Carto candidate"
     Wait-Healthy "giss-osm-carto" 15
@@ -289,6 +310,7 @@ try {
   }
   catch {
     Set-DotEnvValue "OSM_CARTO_VOLUME_NAME" $activeVolume
+    Get-ChildItem -LiteralPath $tileCache -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
     Invoke-Compose @("up", "-d", "--force-recreate", "osm-carto") "Restoring the previous OSM Carto database"
     Wait-Healthy "giss-osm-carto" 15
     throw

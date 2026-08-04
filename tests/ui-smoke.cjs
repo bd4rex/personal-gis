@@ -20,6 +20,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
+  let localCartoRequestCount = 0;
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(`console: ${message.text()}`);
   });
@@ -31,6 +32,9 @@ fs.mkdirSync(outputDir, { recursive: true });
     const isExpectedApiAbort = request.url().includes("/api/") && request.method() === "GET"
       && (errorText.includes("ERR_ABORTED") || errorText.includes("ERR_NETWORK_CHANGED"));
     if (!isExpectedTileAbort && !isExpectedCartoTileAbort && !isExpectedApiAbort) errors.push(`request: ${request.url()} ${errorText}`);
+  });
+  page.on("request", (request) => {
+    if (request.url().includes("/osm-carto/tile/")) localCartoRequestCount += 1;
   });
   await page.route("**/api/maintenance", async (route) => {
     if (route.request().method() === "POST" && route.request().url().endsWith("/jobs")) {
@@ -71,7 +75,7 @@ fs.mkdirSync(outputDir, { recursive: true });
     });
   });
 
-  await page.goto(`${baseUrl}/`, { waitUntil: "load" });
+  await page.goto(`${baseUrl}/?lon=118.89574&lat=32.05272&zoom=16`, { waitUntil: "load" });
   await page.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 90000 });
   await page.waitForTimeout(2500);
 
@@ -92,6 +96,9 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (await attribution.count() < 1) throw new Error("OpenStreetMap attribution is missing.");
   if (await page.getByRole("link", { name: /OpenStreetMap Carto/ }).count() !== 1) {
     throw new Error("The local OpenStreetMap Carto layer is not active by default.");
+  }
+  if (localCartoRequestCount < 1) {
+    throw new Error("The selected local OpenStreetMap Carto layer requested no rendered tiles.");
   }
   const styleChoices = await page.locator("[data-theme]").allTextContents();
   if (styleChoices.length !== 2 || !styleChoices.includes("OSM 原版") || !styleChoices.includes("交互矢量")) {

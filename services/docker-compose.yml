@@ -205,6 +205,7 @@ services:
     volumes:
       - giss_osm_carto_data:/data/database/
       - ../data/osm-carto-tiles:/data/tiles/
+      - ./osm-carto-apache.conf:/etc/apache2/sites-available/000-default.conf:ro
     expose:
       - "80"
     healthcheck:

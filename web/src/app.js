@@ -2145,6 +2145,11 @@ function syncMapShortcuts() {
   elements.onlineMapShortcut?.classList.toggle("degraded", state.onlineMapEnabled && state.onlineMapStatus === "degraded");
   elements.onlineMapShortcut?.classList.toggle("fallback", state.onlineMapEnabled && state.onlineMapStatus === "fallback");
   elements.onlineMapShortcut?.setAttribute("aria-pressed", String(state.onlineMapEnabled));
+  document.querySelectorAll("[data-theme]").forEach((button) => {
+    const active = !state.onlineMapEnabled && button.dataset.theme === state.theme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   document.querySelectorAll("[data-online-provider]").forEach((button) => {
     const provider = button.dataset.onlineProvider;
     const active = provider === "offline"
@@ -2528,13 +2533,16 @@ function addOfflineReferenceLayers() {
   });
   const localOsmCarto = state.resourceCatalog?.localMaps?.osmCarto;
   if (localOsmCarto?.tiles?.length) {
+    const localOsmCartoBounds = Array.isArray(localOsmCarto.bounds) && localOsmCarto.bounds.length === 4
+      ? { bounds: localOsmCarto.bounds.map(Number) }
+      : {};
     map.addSource("local-osm-carto", {
       type: "raster",
       tiles: localOsmCarto.tiles,
       tileSize: Number(localOsmCarto.tileSize) || 256,
       minzoom: Number(localOsmCarto.minZoom) || 0,
       maxzoom: Number(localOsmCarto.maxZoom) || 20,
-      bounds: localOsmCarto.bounds,
+      ...localOsmCartoBounds,
       attribution: `<a href="${escapeHtml(localOsmCarto.copyrightUrl || "https://www.openstreetmap.org/copyright")}" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a> · <a href="${escapeHtml(localOsmCarto.styleUrl || "https://github.com/gravitystorm/openstreetmap-carto")}" target="_blank" rel="noreferrer">OpenStreetMap Carto</a>`
     });
     map.addLayer({
@@ -3530,6 +3538,9 @@ function updateMeasure() {
 
 async function switchTheme(theme) {
   const normalizedTheme = theme === "osm-carto" ? "osm-carto" : "vector";
+  // Theme choices are local base maps. An enabled online source sits above them,
+  // so leave online mode before applying a local theme.
+  if (state.onlineMapEnabled) setOnlineMapEnabled(false, false);
   state.theme = normalizedTheme;
   localStorage.setItem("giss-theme", normalizedTheme);
   document.querySelectorAll("[data-theme]").forEach((button) => {
@@ -4170,6 +4181,7 @@ async function init() {
   cacheElements();
   setSidePanelCollapsed(document.body.classList.contains("panel-collapsed"), false);
   icons();
+  const requestParameters = new URLSearchParams(window.location.search);
   const [catalog, resourceCatalog, worldCatalog, packStatus, packBoundaries] = await Promise.all([
     fetch("/config/map-catalog.json", { cache: "no-store" }).then((response) => response.json()),
     fetch("/config/resource-catalog.json", { cache: "no-store" }).then((response) => response.json()),
@@ -4212,12 +4224,26 @@ async function init() {
   state.layerGroups = generated.groups;
 
   const initialBounds = combinedInstalledBounds() || activeDataset()?.bounds || [114.7, 29.25, 122.25, 35.45];
-  const initialCenter = [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2];
+  const defaultCenter = [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2];
+  const requestedLongitudeText = requestParameters.get("lon") ?? requestParameters.get("lng");
+  const requestedLatitudeText = requestParameters.get("lat");
+  const requestedZoomText = requestParameters.get("zoom");
+  const requestedLongitude = requestedLongitudeText === null ? NaN : Number(requestedLongitudeText);
+  const requestedLatitude = requestedLatitudeText === null ? NaN : Number(requestedLatitudeText);
+  const requestedZoom = requestedZoomText === null ? NaN : Number(requestedZoomText);
+  const initialCenter = Number.isFinite(requestedLongitude) && Number.isFinite(requestedLatitude)
+    && requestedLongitude >= -180 && requestedLongitude <= 180
+    && requestedLatitude >= -85.05112878 && requestedLatitude <= 85.05112878
+    ? [requestedLongitude, requestedLatitude]
+    : defaultCenter;
+  const initialZoom = Number.isFinite(requestedZoom)
+    ? Math.max(state.catalog.limits.minZoom, Math.min(state.catalog.limits.maxZoom, requestedZoom))
+    : 6.3;
 
   state.map = new maplibregl.Map({
     container: "map",
     center: initialCenter,
-    zoom: 6.3,
+    zoom: initialZoom,
     minZoom: state.catalog.limits.minZoom,
     maxZoom: state.catalog.limits.maxZoom,
     maxBounds: state.catalog.limits.maxBounds,
@@ -4236,7 +4262,6 @@ async function init() {
 
   wireUi();
   wireMap();
-  const requestParameters = new URLSearchParams(window.location.search);
   const requestedMapPack = requestParameters.get("pack");
   const requestedCoveragePack = requestParameters.get("coverage");
   if (requestedCoveragePack) locateRegionPack(requestedCoveragePack);
