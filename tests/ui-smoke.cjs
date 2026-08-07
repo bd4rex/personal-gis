@@ -269,10 +269,35 @@ fs.mkdirSync(outputDir, { recursive: true });
   const legendShortcut = page.getByRole("button", { name: "图例", exact: true });
   await legendShortcut.click();
   if (!(await page.locator("#legendPopover").isVisible())) throw new Error("Legend shortcut did not open the legend.");
+  const vectorLegend = await page.locator("#legendPopover").innerText();
+  if (!vectorLegend.includes("离线交互矢量") || !vectorLegend.includes("符号可随图层开关") || !vectorLegend.includes("植被与绿地")) {
+    throw new Error(`Vector legend did not reflect the rendered base map: ${vectorLegend}`);
+  }
+  if (!vectorLegend.includes("已开启的独立叠加层") || !vectorLegend.includes("等高线")) {
+    throw new Error(`Legend did not separate enabled overlays from the base map: ${vectorLegend}`);
+  }
+  await page.locator("#legendDetails summary").click();
+  const vectorDetailLegend = await page.locator("#legendDetails").innerText();
+  if (!vectorDetailLegend.includes("住宅用地") || !vectorDetailLegend.includes("自行车道") || !vectorDetailLegend.includes("门牌号码")) {
+    throw new Error(`Expanded vector legend is incomplete: ${vectorDetailLegend}`);
+  }
   await page.getByRole("button", { name: "关闭图例", exact: true }).click();
   if (!(await page.locator("#legendPopover").isHidden())) throw new Error("Legend did not close.");
 
   await page.getByRole("button", { name: "图层" }).click();
+  await page.getByRole("button", { name: "OSM 原版", exact: true }).click();
+  await page.waitForTimeout(1800);
+  await legendShortcut.click();
+  const originalLegend = await page.locator("#legendPopover").innerText();
+  if (!originalLegend.includes("离线 OSM 原版") || !originalLegend.includes("OSM Carto 栅格样式") || !originalLegend.includes("公园与绿地")) {
+    throw new Error(`OSM Original legend did not follow the base-map switch: ${originalLegend}`);
+  }
+  const originalDetailLegend = await page.locator("#legendDetails").innerText();
+  if (!originalDetailLegend.includes("普通道路 / 支路") || !originalDetailLegend.includes("工业用地") || !originalDetailLegend.includes("餐饮 / 常用设施")) {
+    throw new Error(`Expanded OSM legend did not follow the base-map switch: ${originalDetailLegend}`);
+  }
+  if (originalLegend === vectorLegend) throw new Error("Legend content stayed static after switching the base map.");
+  await page.getByRole("button", { name: "关闭图例", exact: true }).click();
   await page.getByRole("button", { name: "交互矢量", exact: true }).click();
   await page.waitForTimeout(1800);
   const richDetails = await page.evaluate(async () => {

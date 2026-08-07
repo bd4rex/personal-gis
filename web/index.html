@@ -7,7 +7,7 @@
     <title>GIS_P 个人离线地图</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css" />
-    <link rel="stylesheet" href="/src/app.css?v=20260802-2" />
+    <link rel="stylesheet" href="/src/app.css?v=20260807-2" />
   </head>
   <body class="panel-collapsed">
     <div id="map" aria-label="个人离线地图"></div>
@@ -86,24 +86,32 @@
       </aside>
       <aside id="legendPopover" class="legend-popover" aria-label="地图图例" hidden>
         <header>
-          <strong>图例</strong>
+          <span class="legend-heading">
+            <strong>图例</strong>
+            <small id="legendSourceLabel">正在识别当前底图</small>
+          </span>
           <button id="legendCloseButton" class="icon-button compact" type="button" title="关闭图例" aria-label="关闭图例">
             <i data-lucide="x"></i>
           </button>
         </header>
-        <div class="legend-grid">
-          <span><i class="swatch water"></i>水域</span>
-          <span><i class="swatch park"></i>绿地</span>
-          <span><i class="swatch motorway"></i>高速</span>
-          <span><i class="swatch primary-road"></i>主干路</span>
-          <span><i class="swatch rail"></i>铁路</span>
-          <span><i class="swatch poi"></i>兴趣点</span>
-          <span><i class="swatch personal"></i>个人点位</span>
-          <span><i class="swatch track"></i>个人轨迹</span>
-          <span><i class="swatch terrain"></i>地形阴影</span>
-          <span><i class="swatch contours"></i>等高线</span>
-          <span><i class="swatch emergency"></i>应急设施</span>
-        </div>
+        <p id="legendSourceHint" class="legend-source-hint">图例会跟随实际显示的底图更新。</p>
+        <section class="legend-section" aria-labelledby="legendBaseTitle">
+          <h2 id="legendBaseTitle">当前底图符号</h2>
+          <div id="legendBaseGrid" class="legend-grid"></div>
+        </section>
+        <details id="legendDetails" class="legend-details">
+          <summary>
+            <span class="legend-details-closed">查看详细图例</span>
+            <span class="legend-details-open">收起详细图例</span>
+            <small>道路、用地、设施与标注</small>
+          </summary>
+          <div id="legendDetailGroups" class="legend-detail-groups"></div>
+        </details>
+        <section class="legend-section legend-overlay-section" aria-labelledby="legendOverlayTitle">
+          <h2 id="legendOverlayTitle">已开启的独立叠加层</h2>
+          <div id="legendOverlayGrid" class="legend-grid"></div>
+          <small id="legendOverlayEmpty" class="legend-empty" hidden>当前没有开启独立叠加层</small>
+        </section>
       </aside>
     </div>
 
@@ -465,6 +473,6 @@
     <script src="/vendor/maplibre-contour/index.min.js"></script>
     <script src="/vendor/lucide/lucide.min.js"></script>
   <script src="/src/map-style.js?v=20260803-1"></script>
-    <script type="module" src="/src/app.js?v=20260807-3"></script>
+    <script type="module" src="/src/app.js?v=20260807-4"></script>
   </body>
 </html>

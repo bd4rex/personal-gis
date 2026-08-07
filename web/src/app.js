@@ -88,6 +88,7 @@ const state = {
   selectedMapFeature: null,
   detailRequestId: 0,
   activePhotoTarget: null,
+  legendSignature: "",
   toastTimer: null
 };
 
@@ -110,7 +111,8 @@ function cacheElements() {
     "resourceStorageTrack", "resourceDiskUsedBar", "resourceManagedUsedBar", "resourceDiskUsed", "resourceManagedSize", "resourceSearchWrap",
     "resourceSearchInput", "resourceManagerBody", "resourceRegionBrowser", "resourceRegionList",
     "resourceManagerContent", "viewSwitcher", "mapShortcuts",
-    "contourShortcut", "legendShortcut", "legendPopover", "legendCloseButton", "onlineMapShortcut",
+    "contourShortcut", "legendShortcut", "legendPopover", "legendCloseButton", "legendSourceLabel",
+    "legendSourceHint", "legendBaseGrid", "legendDetailGroups", "legendOverlayGrid", "legendOverlayEmpty", "onlineMapShortcut",
     "mapSourcePopover", "mapSourceCloseButton", "mapSourceStatus", "mapCoverageStatus",
     "coveragePrompt", "coveragePromptTitle", "coveragePromptText",
     "coverageDownloadButton", "coverageCloseButton", "modeBanner",
@@ -2322,6 +2324,174 @@ function mapSourcePresentation() {
   return { label: "OSM 标准地图已连接", icon: "wifi", tone: "online" };
 }
 
+const legendBaseStyles = {
+  "osm-carto": {
+    hint: "OSM Carto 栅格样式；道路、用地和兴趣点配色与交互矢量不同。",
+    items: [
+      ["water", "水域"], ["park", "公园与绿地"], ["motorway", "高速公路"],
+      ["primary-road", "主干路"], ["secondary-road", "次干路"], ["rail", "铁路"],
+      ["osm-building", "建筑"], ["osm-boundary", "行政边界"], ["poi", "设施 / 兴趣点"]
+    ],
+    groups: [
+      { title: "道路与交通", items: [
+        ["motorway", "高速公路"], ["primary-road", "主干路"], ["secondary-road", "次干路"],
+        ["minor-road", "普通道路 / 支路"], ["path", "步道 / 便道"], ["rail", "铁路"],
+        ["tunnel", "隧道"], ["bridge", "桥梁"], ["road-ref", "道路编号"]
+      ] },
+      { title: "土地利用与水系", items: [
+        ["water", "湖泊 / 水面"], ["waterway", "河流 / 溪流"], ["park", "公园"],
+        ["osm-forest", "森林"], ["osm-grass", "草地"], ["osm-wetland", "湿地"],
+        ["osm-farmland", "农田"], ["osm-residential", "住宅用地"], ["osm-commercial", "商业用地"],
+        ["osm-industrial", "工业用地"], ["osm-cemetery", "墓地"], ["osm-sand", "沙地"]
+      ] },
+      { title: "建筑、边界与设施", items: [
+        ["osm-building", "建筑物"], ["osm-boundary", "行政边界"], ["osm-school", "学校用地"],
+        ["osm-hospital-area", "医疗用地"], ["aeroway", "机场 / 跑道"], ["poi-hospital poi-dot", "医疗设施"],
+        ["poi-school poi-dot", "教育设施"], ["poi-transit poi-dot", "车站 / 公交"], ["poi-shop poi-dot", "商店 / 服务"],
+        ["poi-tourism poi-dot", "旅游 / 历史"], ["poi-amenity poi-dot", "餐饮 / 常用设施"], ["mountain", "山峰"]
+      ] },
+      { title: "文字与标注", items: [
+        ["label-sample", "地点 / 设施名称"], ["road-ref", "路线编号"], ["house-number", "门牌号码"]
+      ] }
+    ],
+    note: "OSM 原版包含大量图标；这里按用途归类，具体图标和名称会随缩放级别出现。"
+  },
+  vector: {
+    hint: "交互矢量样式；符号可随图层开关、缩放级别和交互状态变化。",
+    items: [
+      ["vector-water", "水域"], ["vector-park", "植被与绿地"], ["motorway", "高速公路"],
+      ["primary-road", "主干路"], ["secondary-road", "次干路"], ["rail", "铁路"],
+      ["vector-building", "建筑"], ["vector-boundary", "行政边界"], ["vector-poi", "设施 / 兴趣点"]
+    ],
+    groups: [
+      { title: "道路与交通", items: [
+        ["motorway", "高速公路"], ["primary-road", "主干路 / 快速路"], ["secondary-road", "次干路 / 三级路"],
+        ["minor-road", "支路 / 服务道路"], ["path", "步道 / 台阶"], ["cycleway", "自行车道"],
+        ["rail", "铁路 / 轨道交通"], ["tunnel", "隧道"], ["bridge", "桥梁"], ["road-ref", "道路编号"]
+      ] },
+      { title: "自然地貌与水系", items: [
+        ["vector-water", "湖泊 / 水面"], ["waterway", "河流 / 溪流"], ["vector-forest", "森林"],
+        ["vector-park", "草地 / 公园"], ["vector-wetland", "湿地"], ["vector-farmland", "农田"],
+        ["osm-sand", "沙地"], ["terrain", "岩石 / 裸地"]
+      ] },
+      { title: "城市用地、建筑与边界", items: [
+        ["vector-residential", "住宅用地"], ["vector-commercial", "商业 / 零售"], ["vector-industrial", "工业用地"],
+        ["vector-school", "学校用地"], ["vector-hospital-area", "医疗用地"], ["vector-cemetery", "墓地"],
+        ["aeroway", "机场 / 跑道"], ["vector-building", "建筑物"], ["vector-boundary", "行政边界"]
+      ] },
+      { title: "兴趣点与标注", items: [
+        ["poi-park poi-dot", "公园设施"], ["poi-hospital poi-dot", "医疗设施"], ["poi-school poi-dot", "教育设施"],
+        ["poi-transit poi-dot", "铁路 / 交通设施"], ["poi-amenity poi-dot", "公共设施"], ["poi-shop poi-dot", "购物"],
+        ["poi-tourism poi-dot", "旅游 / 历史"], ["mountain", "山峰"], ["label-sample", "名称标注"],
+        ["house-number", "门牌号码"]
+      ] }
+    ],
+    note: "矢量图层会按缩放级别逐步显示；门牌、步道和详细兴趣点通常要放大后才出现。"
+  },
+  overview: {
+    hint: "全球低缩放概览只表达骨架信息，不代表详细道路和完整兴趣点。",
+    items: [
+      ["world-land", "陆地与地貌"], ["world-water", "水域"], ["world-park", "主要绿地"],
+      ["world-country", "国家边界"], ["world-region", "地区边界"], ["world-road", "主要道路"],
+      ["rail", "主要铁路"], ["world-river", "主要河流"], ["world-place", "国家 / 城市名称"]
+    ],
+    groups: [
+      { title: "地貌与水系", items: [
+        ["world-land", "陆地 / 一般地貌"], ["osm-forest", "林地"], ["world-park", "主要公园"],
+        ["world-urban", "城市区域"], ["world-sand", "沙地"], ["world-ice", "冰雪区域"],
+        ["world-water", "海洋 / 湖泊"], ["world-river", "主要河流"]
+      ] },
+      { title: "交通、边界与地名", items: [
+        ["world-road", "高速 / 主干路"], ["rail", "主要铁路"], ["world-country", "国家边界"],
+        ["world-region", "地区边界"], ["world-place", "国家名称"], ["label-sample", "地区 / 城市名称"]
+      ] }
+    ],
+    note: "全球概览只包含低缩放骨架数据；建筑、街巷和普通兴趣点并不存在于这一底图中。"
+  }
+};
+
+const legendOverlayItems = [
+  { group: "personal", items: [["personal", "个人点位"], ["track", "个人轨迹"]] },
+  { group: "terrain", items: [["terrain", "地形阴影"]] },
+  { group: "contours", items: [["contours", "等高线"]] },
+  { group: "weather", items: [["weather", "天气快照"]] },
+  { group: "nautical", items: [["nautical", "航海参考"]] },
+  { group: "emergency", items: [["emergency", "应急设施"]] }
+];
+
+function currentLegendPresentation() {
+  const source = mapSourcePresentation();
+  if (state.onlineMapEnabled) {
+    if (state.onlineMapStatus === "degraded") {
+      return { key: "overview", label: source.label };
+    }
+    if (state.onlineMapProvider === "openfreemap") {
+      return { key: "vector", label: source.label };
+    }
+    return { key: "osm-carto", label: source.label };
+  }
+  if (state.theme === "vector" || state.localBaseMapMode === "vector-fallback") {
+    return { key: "vector", label: source.label };
+  }
+  if (state.localBaseMapMode === "osm-carto") {
+    return { key: "osm-carto", label: source.label };
+  }
+  return { key: "overview", label: source.label };
+}
+
+function renderLegendItems(container, items) {
+  if (!container) return;
+  container.replaceChildren(...items.map(([swatch, label]) => {
+    const row = document.createElement("span");
+    const marker = document.createElement("i");
+    marker.className = `swatch ${swatch}`;
+    marker.setAttribute("aria-hidden", "true");
+    row.append(marker, document.createTextNode(label));
+    return row;
+  }));
+}
+
+function renderLegendGroups(container, groups, note = "") {
+  if (!container) return;
+  const sections = groups.map((group) => {
+    const section = document.createElement("section");
+    section.className = "legend-detail-group";
+    const heading = document.createElement("h3");
+    heading.textContent = group.title;
+    const grid = document.createElement("div");
+    grid.className = "legend-grid";
+    renderLegendItems(grid, group.items);
+    section.append(heading, grid);
+    return section;
+  });
+  if (note) {
+    const noteElement = document.createElement("small");
+    noteElement.className = "legend-detail-note";
+    noteElement.textContent = note;
+    sections.push(noteElement);
+  }
+  container.replaceChildren(...sections);
+}
+
+function renderLegend() {
+  if (!elements.legendSourceLabel || !elements.legendBaseGrid) return;
+  const presentation = currentLegendPresentation();
+  const style = legendBaseStyles[presentation.key];
+  const overlays = legendOverlayItems
+    .filter(({ group }) => state.layerVisibility[group] !== false)
+    .flatMap(({ items }) => items);
+  const signature = [presentation.key, presentation.label, ...overlays.flat()].join("|");
+  if (state.legendSignature === signature) return;
+  state.legendSignature = signature;
+  elements.legendSourceLabel.textContent = presentation.label;
+  elements.legendSourceHint.textContent = style.hint;
+  renderLegendItems(elements.legendBaseGrid, style.items);
+  renderLegendGroups(elements.legendDetailGroups, style.groups, style.note);
+  renderLegendItems(elements.legendOverlayGrid, overlays);
+  elements.legendOverlayEmpty.hidden = overlays.length > 0;
+  elements.legendPopover.dataset.legendStyle = presentation.key;
+}
+
 function mapFocusCoordinate(coordinate = null) {
   if (coordinate) return coordinate;
   if (!state.map) return null;
@@ -2379,6 +2549,7 @@ function syncMapSourceControl() {
   }
   elements.onlineMapShortcut.classList.remove("source-online", "source-loading", "source-degraded", "source-offline", "source-offline-covered");
   elements.onlineMapShortcut.classList.add(`source-${source.tone === "offline" && coverage.installed ? "offline-covered" : source.tone}`);
+  renderLegend();
 }
 
 function setMapSourceOpen(open) {
@@ -2684,6 +2855,7 @@ function useResourceAction(action) {
 }
 
 function setLegendOpen(open) {
+  if (open) renderLegend();
   elements.legendPopover.hidden = !open;
   elements.legendShortcut.classList.toggle("active", open);
   elements.legendShortcut.setAttribute("aria-expanded", String(open));
