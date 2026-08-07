@@ -43,10 +43,18 @@ $powerShellFiles = @(
   Get-ChildItem -LiteralPath (Join-Path $root "scripts") -Recurse -File -Filter "*.ps1"
   Get-ChildItem -LiteralPath (Join-Path $root "tests") -Recurse -File -Filter "*.ps1"
 )
+$strictUtf8 = New-Object Text.UTF8Encoding($false, $true)
 foreach ($file in $powerShellFiles) {
   $tokens = $null
   $parseErrors = $null
-  [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
+  try {
+    $source = [IO.File]::ReadAllText($file.FullName, $strictUtf8)
+  }
+  catch {
+    Add-ContractFailure "PowerShell source is not valid UTF-8: $($file.FullName) - $($_.Exception.Message)"
+    continue
+  }
+  [void][System.Management.Automation.Language.Parser]::ParseInput($source, $file.FullName, [ref]$tokens, [ref]$parseErrors)
   foreach ($parseError in @($parseErrors)) {
     Add-ContractFailure "PowerShell parse error in $($file.FullName):$($parseError.Extent.StartLineNumber): $($parseError.Message)"
   }
