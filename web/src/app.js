@@ -379,7 +379,7 @@ function mergeResourceCatalog(baseCatalog, worldCatalog) {
 
 function resourceRegionName(region) {
   if (!region) return "";
-  const fallbackNames = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区" };
+  const fallbackNames = { JP: "日本", TW: "台湾省", HK: "香港特别行政区", MO: "澳门特别行政区" };
   if (fallbackNames[region.isoCode]) return fallbackNames[region.isoCode];
   if (region.isoCode && typeof Intl.DisplayNames === "function") {
     try {
@@ -393,7 +393,7 @@ function resourceRegionName(region) {
 
 function resourcePackName(pack) {
   const regionCode = String(pack?.countryId || "").toUpperCase();
-  const fallbackNames = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区" };
+  const fallbackNames = { JP: "日本", TW: "台湾省", HK: "香港特别行政区", MO: "澳门特别行政区" };
   if (fallbackNames[regionCode]) return fallbackNames[regionCode];
   if (pack?.kind === "country" && /^[A-Z]{2}$/.test(regionCode) && typeof Intl.DisplayNames === "function") {
     try {
@@ -1409,6 +1409,12 @@ function setStatusTone(element, tone = "") {
 
 function baseFeatureName(feature) {
   const properties = feature?.properties || {};
+  const featureClass = String(properties.class || "").toLowerCase();
+  const names = [properties.name_zh, properties["name:zh"], properties.name, properties.name_en];
+  if (["country", "state"].includes(featureClass)
+      && names.some((name) => ["中华民国", "Taiwan", "Taiwan Province"].includes(name))) {
+    return "台湾省";
+  }
   return properties.name_zh || properties["name:zh"] || properties.name || properties.name_en || properties["name:latin"] || "";
 }
 
@@ -2695,7 +2701,23 @@ function addWorldVectorOverviewLayers(map, beforeLayerId = undefined) {
   const revision = String(overview.revision || "").trim();
   const revisionSeparator = overview.url.includes("?") ? "&" : "?";
   const sourceUrl = `${overview.url}${revision ? `${revisionSeparator}v=${encodeURIComponent(revision)}` : ""}`;
-  const nameField = ["coalesce", ["get", "name:zh"], ["get", "name"], ["get", "name:latin"], ["get", "name_en"]];
+  const sourceNameField = ["coalesce", ["get", "name:zh"], ["get", "name"], ["get", "name:latin"], ["get", "name_en"]];
+  const nameField = [
+    "case",
+    [
+      "all",
+      ["in", ["get", "class"], ["literal", ["country", "state"]]],
+      [
+        "any",
+        ["==", ["get", "name:zh"], "中华民国"],
+        ["==", ["get", "name"], "中华民国"],
+        ["==", ["get", "name_en"], "Taiwan"],
+        ["==", ["get", "name_en"], "Taiwan Province"]
+      ]
+    ],
+    "台湾省",
+    sourceNameField
+  ];
   map.addSource(sourceId, {
     type: "vector",
     url: `pmtiles://${window.location.origin}${sourceUrl}`,

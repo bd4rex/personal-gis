@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-07",
+  "scenario": {
+    "url": "http://127.0.0.1:8080/?lon=118.89574&lat=32.05272&zoom=12",
+    "viewport": "1440x900",
+    "browser": "Google Chrome headless",
+    "host": "Windows local workstation",
+    "services": "already running",
+    "method": "three fresh browser contexts; median retained; operating-system and service caches may be warm"
+  },
+  "samples": [
+    { "domContentLoadedMs": 286, "mapCanvasMs": 1270, "systemReadyMs": 1701, "worldOverviewHeaderMs": 18, "mapPackRequests": 1 },
+    { "domContentLoadedMs": 283, "mapCanvasMs": 1230, "systemReadyMs": 1546, "worldOverviewHeaderMs": 11, "mapPackRequests": 1 },
+    { "domContentLoadedMs": 278, "mapCanvasMs": 1707, "systemReadyMs": 3145, "worldOverviewHeaderMs": 30, "mapPackRequests": 1 }
+  ],
+  "median": {
+    "domContentLoadedMs": 283,
+    "mapCanvasMs": 1270,
+    "systemReadyMs": 1701,
+    "worldOverviewHeaderMs": 18,
+    "worldOverviewHeaderBytes": 16384,
+    "mapPackRequests": 1
+  },
+  "guardrails": {
+    "description": "Intentionally wider than normal run-to-run variance; catches material regressions without treating one slow local run as a failure.",
+    "maximumMs": {
+      "domContentLoadedMs": 1500,
+      "mapCanvasMs": 5000,
+      "systemReadyMs": 6000
+    }
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-07",
+  "profiles": {
+    "static": "Repository contracts that need neither Docker nor running GIS_P services.",
+    "browser": "Static contracts, service health, and all browser regressions.",
+    "full": "Static contracts, service health, API/data lifecycle, and all browser regressions.",
+    "recovery": "The full profile followed by the isolated offline-recovery drill."
+  },
+  "cases": [
+    {
+      "id": "TC-STATIC-001",
+      "title": "Repository configuration and test catalog remain parseable",
+      "area": "repository",
+      "risk": "A malformed catalog or configuration makes builds and maintenance behavior ambiguous.",
+      "profiles": ["static", "browser", "full", "recovery"],
+      "automation": ["tests/repository-contracts.ps1"],
+      "assertions": [
+        "Tracked JSON configuration parses successfully.",
+        "Test identifiers are unique and every automation path exists.",
+        "Every browser smoke script and its support data are copied into the UI-test image."
+      ],
+      "evidence": "Console summary from the static repository-contract run."
+    },
+    {
+      "id": "TC-STATIC-002",
+      "title": "PowerShell entry points remain syntactically valid",
+      "area": "repository",
+      "risk": "A parse error can block startup, maintenance, backup, or recovery before runtime checks begin.",
+      "profiles": ["static", "browser", "full", "recovery"],
+      "automation": ["tests/repository-contracts.ps1"],
+      "assertions": [
+        "Every tracked PowerShell script parses without syntax errors."
+      ],
+      "evidence": "PowerShell parser count in the static test summary."
+    },
+    {
+      "id": "TC-DOC-001",
+      "title": "Maintained documentation keeps English and Chinese pairs",
+      "area": "documentation",
+      "risk": "Operational changes can silently leave one language with stale or missing instructions.",
+      "profiles": ["static", "browser", "full", "recovery"],
+      "automation": ["tests/repository-contracts.ps1"],
+      "assertions": [
+        "Each maintained Markdown document has its .zh-CN.md or English counterpart.",
+        "Each document links to its language counterpart."
+      ],
+      "evidence": "Bilingual-pair count in the static test summary."
+    },
+    {
+      "id": "TC-DOC-002",
+      "title": "Local Markdown links resolve inside the repository",
+      "area": "documentation",
+      "risk": "Moved or renamed runbooks can leave recovery and operations instructions unusable.",
+      "profiles": ["static", "browser", "full", "recovery"],
+      "automation": ["tests/repository-contracts.ps1"],
+      "assertions": [
+        "Every relative Markdown file link resolves to an existing repository path."
+      ],
+      "evidence": "Local-link count in the static test summary."
+    },
+    {
+      "id": "TC-HEALTH-001",
+      "title": "Local service stack and installed products are healthy",
+      "area": "runtime",
+      "risk": "A nominally running stack can still have broken PMTiles ranges, stale resources, or unavailable engines.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["scripts/health-check.ps1"],
+      "assertions": [
+        "Compose services, nginx, API, PostGIS, Martin, installed PMTiles range requests, resource inventory, weather, routing, elevation, and knowledge services pass their health contracts."
+      ],
+      "evidence": "Structured health-check output."
+    },
+    {
+      "id": "TC-PACK-001",
+      "title": "Regional and global package catalogs preserve lifecycle metadata",
+      "area": "map packages",
+      "risk": "New regions can appear installable while boundaries, source ownership, details, or recovery metadata are incomplete.",
+      "profiles": ["full", "recovery"],
+      "automation": ["scripts/smoke-test.ps1"],
+      "assertions": [
+        "The 34 province units and global Geofabrik catalog are complete.",
+        "Installed packages verify through the maintenance queue.",
+        "Package manifests expose source, rich-detail, checksum, and recovery metadata.",
+        "Protected removal is rejected without its confirmation token."
+      ],
+      "evidence": "Functional smoke-test completion output and maintenance verification results."
+    },
+    {
+      "id": "TC-RESOURCE-001",
+      "title": "Derived resources match every enabled installed region",
+      "area": "resource lifecycle",
+      "risk": "A newly installed region can be present in PMTiles but absent from Carto, search, routing, elevation, weather, or nautical products.",
+      "profiles": ["full", "recovery"],
+      "automation": ["scripts/smoke-test.ps1", "tests/resource-console-smoke.cjs"],
+      "assertions": [
+        "Resource inventory and update checks cover all enabled packages.",
+        "Per-region source provenance and freshness are shown for shared and derived resources.",
+        "The resource console exposes real, non-destructive management actions and worker state."
+      ],
+      "evidence": "Functional smoke output plus resource-console screenshot."
+    },
+    {
+      "id": "TC-DATA-001",
+      "title": "Personal places, tracks, collections, search, and version conflicts work end to end",
+      "area": "personal data",
+      "risk": "Schema or API changes can lose edits, bypass optimistic concurrency, or leave temporary data behind.",
+      "profiles": ["full", "recovery"],
+      "automation": ["scripts/smoke-test.ps1"],
+      "assertions": [
+        "Temporary places, tracks, and collections can be created, queried, updated, assigned, and deleted.",
+        "Version conflicts are rejected and database counts return to their starting values."
+      ],
+      "evidence": "Functional smoke output; cleanup always runs from the script finally block."
+    },
+    {
+      "id": "TC-DATA-002",
+      "title": "Imports, exports, and media ownership remain recoverable",
+      "area": "personal data",
+      "risk": "Exports can omit records or media, while deletion can leave orphaned ownership metadata.",
+      "profiles": ["full", "recovery"],
+      "automation": ["scripts/smoke-test.ps1", "tests/fixtures/sample.gpx"],
+      "assertions": [
+        "GPX import, GeoJSON export, per-track and full GPX export, and personal ZIP export are valid.",
+        "Linked media follows place and track ownership and is removed without orphans."
+      ],
+      "evidence": "Functional smoke output and validated temporary export archive."
+    },
+    {
+      "id": "TC-UI-001",
+      "title": "Main map workflow, details, editing, and responsive layout remain usable",
+      "area": "main UI",
+      "risk": "Map, panel, accessibility, and tool-control changes can regress together without API failures.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["tests/ui-smoke.cjs"],
+      "assertions": [
+        "GIS_P branding, collapsed-sidebar accessibility, local Carto rendering, PMTiles details, collections, offline search, edit mode, contours, legend, attribution, and narrow layout pass.",
+        "Runtime console and network failures contain no unexpected errors."
+      ],
+      "evidence": "Playwright console output and runtime/ui-smoke screenshots."
+    },
+    {
+      "id": "TC-UI-002",
+      "title": "Resource console keeps catalog, lifecycle, and task state visible",
+      "area": "resource UI",
+      "risk": "Catalog growth or task updates can overflow the layout or replace the resource-browsing workspace.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["tests/resource-console-smoke.cjs"],
+      "assertions": [
+        "Installed rows match the API, the global hierarchy and search work, and source/version details are visible.",
+        "Storage, update, worker, action, and persistent task-rail layouts do not overflow."
+      ],
+      "evidence": "Playwright output and runtime/resource-console-smoke screenshots."
+    },
+    {
+      "id": "TC-MAP-001",
+      "title": "Map source selection and offline fallback remain deterministic",
+      "area": "map browsing",
+      "risk": "Provider failures, Carto lag, or map movement can produce blank maps or misleading coverage state.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["tests/world-map-smoke.cjs"],
+      "assertions": [
+        "Local Carto, OSM Standard, OpenFreeMap, regional PMTiles, and the world overview switch without rebuilding the full style.",
+        "Provider failure and Carto synchronization states retain the correct fallback.",
+        "Viewport/polygon coverage avoids coastal, ocean, antimeridian, and low-zoom false prompts."
+      ],
+      "evidence": "Playwright output and targeted world-map screenshots."
+    },
+    {
+      "id": "TC-MAP-002",
+      "title": "Global package prompts and Chinese place labels stay normalized",
+      "area": "map browsing",
+      "risk": "Global source data can leak inconsistent country names into prompts, labels, and resource names.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["tests/world-map-smoke.cjs"],
+      "assertions": [
+        "Japan, United States, and Taiwan package prompts resolve through precise country polygons.",
+        "Taiwan is displayed as 台湾省 in package prompts, resource names, feature details, and all global overview label layers."
+      ],
+      "evidence": "world-overview-taiwan-province.png and Playwright assertion output."
+    },
+    {
+      "id": "TC-PERF-001",
+      "title": "Main-map startup stays inside the saved performance envelope",
+      "area": "performance",
+      "risk": "Duplicate inventory requests or synchronous catalog work can materially slow first interaction.",
+      "profiles": ["browser", "full", "recovery"],
+      "automation": ["tests/performance-smoke.cjs", "tests/performance-baseline.json"],
+      "assertions": [
+        "The map-pack inventory is requested once during startup.",
+        "DOMContentLoaded, map canvas, and system-ready milestones stay below wide saved guardrails.",
+        "Current timings are reported against the retained three-run median."
+      ],
+      "evidence": "Structured performance JSON including baseline deltas."
+    },
+    {
+      "id": "TC-RECOVERY-001",
+      "title": "Backup and offline-kit manifests reject missing, unsafe, or modified payloads",
+      "area": "recovery",
+      "risk": "A recovery package can look complete while containing unsafe paths, size drift, or checksum failures.",
+      "profiles": ["recovery"],
+      "automation": ["scripts/verify-offline-kit.ps1", "scripts/test-offline-recovery.ps1"],
+      "assertions": [
+        "Manifest paths stay inside the selected kit and every required payload matches its recorded size and SHA256."
+      ],
+      "evidence": "Offline-kit verification summary."
+    },
+    {
+      "id": "TC-RECOVERY-002",
+      "title": "A complete offline kit restores on an isolated Docker network",
+      "area": "recovery",
+      "risk": "Backups may be individually valid but fail to restore a usable disconnected system.",
+      "profiles": ["recovery"],
+      "automation": ["scripts/test-offline-recovery.ps1"],
+      "assertions": [
+        "Database migrations, personal counts, media, PMTiles, Martin, Nominatim, Valhalla, elevation, Kiwix, nginx, and exports work without external network access.",
+        "Temporary recovery containers, volumes, and network are removed after the drill."
+      ],
+      "evidence": "runtime/recovery-audit report."
+    }
+  ]
+}

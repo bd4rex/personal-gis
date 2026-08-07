@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const path = require("node:path");
 const { chromium } = require("playwright");
 
 const chromeCandidates = [
@@ -8,6 +9,19 @@ const chromeCandidates = [
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   || chromeCandidates.find((candidate) => fs.existsSync(candidate));
 const baseUrl = process.env.GISS_UI_URL || "http://127.0.0.1:8080";
+const baselinePath = path.join(__dirname, "performance-baseline.json");
+const baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+
+function compareWithBaseline(metric, currentValue) {
+  const referenceValue = Number(baseline.median?.[metric]);
+  if (!Number.isFinite(referenceValue) || referenceValue <= 0) return null;
+  return {
+    currentMs: currentValue,
+    baselineMs: referenceValue,
+    deltaMs: currentValue - referenceValue,
+    deltaPercent: Math.round(((currentValue - referenceValue) / referenceValue) * 1000) / 10
+  };
+}
 
 (async () => {
   const launchOptions = { headless: true, args: ["--no-proxy-server"] };
@@ -56,8 +70,10 @@ const baseUrl = process.env.GISS_UI_URL || "http://127.0.0.1:8080";
 
   await browser.close();
   if (mapPackRequests !== 1) throw new Error(`Startup requested /api/map-packs ${mapPackRequests} times.`);
-  if (mapCanvasMs > 15000) throw new Error(`Map canvas took ${mapCanvasMs} ms to appear.`);
-  if (systemReadyMs > 15000) throw new Error(`Local services took ${systemReadyMs} ms to appear ready.`);
+  const limits = baseline.guardrails?.maximumMs || {};
+  if (domContentLoadedMs > (limits.domContentLoadedMs || 15000)) throw new Error(`DOM content loaded in ${domContentLoadedMs} ms, above the saved performance guardrail.`);
+  if (mapCanvasMs > (limits.mapCanvasMs || 15000)) throw new Error(`Map canvas took ${mapCanvasMs} ms to appear, above the saved performance guardrail.`);
+  if (systemReadyMs > (limits.systemReadyMs || 15000)) throw new Error(`Local services took ${systemReadyMs} ms to appear ready, above the saved performance guardrail.`);
   if (failures.length) throw new Error(failures.join("\n"));
 
   console.log(JSON.stringify({
@@ -65,6 +81,12 @@ const baseUrl = process.env.GISS_UI_URL || "http://127.0.0.1:8080";
     mapCanvasMs,
     systemReadyMs,
     mapPackRequests,
+    baselineComparison: {
+      recordedAt: baseline.recordedAt,
+      domContentLoadedMs: compareWithBaseline("domContentLoadedMs", domContentLoadedMs),
+      mapCanvasMs: compareWithBaseline("mapCanvasMs", mapCanvasMs),
+      systemReadyMs: compareWithBaseline("systemReadyMs", systemReadyMs)
+    },
     resources
   }, null, 2));
 })().catch((error) => {

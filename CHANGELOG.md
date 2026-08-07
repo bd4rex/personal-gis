@@ -17,6 +17,7 @@ The repository had no tags or GitHub Releases before this file was introduced. T
 - A Natural Earth 110m/50m/10m vector PMTiles overview with land, water, boundaries, places, roads, railways, and rivers through zoom 7.
 - Region-aware elevation synchronization backed by AWS Open Data Terrain Tiles, with retained HGT manifests and maintenance progress.
 - ETag-backed map-pack and boundary responses, deferred catalog loading, cache warming, and a browser performance smoke test.
+- A machine-readable test-case catalog and unified `static`, `browser`, `full`, and `recovery` profiles, with static contracts running automatically on GitHub pull requests.
 
 ### Fixed
 
@@ -25,6 +26,8 @@ The repository had no tags or GitHub Releases before this file was introduced. T
 - Deduplicated overlapping regional OSM objects before Carto, search, and routing builds.
 - Prevented map panning from rebuilding the complete MapLibre style or hiding installed layers still inside the viewport.
 - Replaced rectangular country guesses with precise country polygons, including antimeridian handling, and suppressed low-zoom false download prompts.
+- Normalized map-package prompts, resource names, feature details, and world-overview labels to display `台湾省` consistently.
+- Normalized the weather JQ program to LF before mounting it into Linux containers, preventing repeated first-run failures for newly installed country packages on a Windows checkout.
 - Normalized container-mounted shell scripts, waited for local Carto assets to become ready, and constrained heavy builds for a 16 GiB host.
 
 ### Improved
@@ -32,6 +35,7 @@ The repository had no tags or GitHub Releases before this file was introduced. T
 - Accelerated terrain tile generation by loading each required HGT grid once per row group instead of once per pixel.
 - Minified the generated global catalog without changing its 547 browse regions or 554 buildable datasets, and enabled nginx compression and explicit config revalidation.
 - Expanded world-map regression coverage for Carto lag, vector fallback, global movement, country selection, and persistent overview rendering.
+- Added static JSON/PowerShell, bilingual-document parity, relative-link, browser-image completeness, and performance-baseline checks.
 
 ## M0.9 — Local OSM Carto rendering and cache reliability
 

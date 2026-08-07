@@ -209,7 +209,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   await taiwanPage.goto(`${baseUrl}/?coverage=gf-taiwan`, { waitUntil: "load" });
   await taiwanPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 30000 });
   const taiwanPrompt = await taiwanPage.locator("#coveragePromptTitle").textContent();
-  if (!taiwanPrompt.includes("台湾") || /Taiwan/i.test(taiwanPrompt)) {
+  if (!taiwanPrompt.includes("台湾省未安装") || /Taiwan/i.test(taiwanPrompt)) {
     throw new Error(`Taiwan offline prompt was not localized: ${taiwanPrompt}`);
   }
   await taiwanPage.locator("#onlineMapShortcut").click();
@@ -370,6 +370,30 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!automaticJapanPrompt.includes("日本") || /Kyūshū|Kyushu/i.test(automaticJapanPrompt)) {
     throw new Error(`Tokyo did not resolve through the country polygon: ${automaticJapanPrompt}`);
   }
+  await movementPage.goto(`${baseUrl}/?lon=121&lat=23.7&zoom=3&overview-regression=taiwan-label`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => {
+    const map = window.__gissMapInstance;
+    if (!map?.loaded() || !map.getLayer("world-vector-country-label")) return false;
+    return map.querySourceFeatures("world-vector-overview", { sourceLayer: "place" })
+      .some((feature) => /Taiwan|中华民国|台湾/.test(JSON.stringify(feature.properties)));
+  }, null, { timeout: 30000 });
+  const taiwanLabelState = await movementPage.evaluate(() => {
+    const map = window.__gissMapInstance;
+    const sourceFeatures = map.querySourceFeatures("world-vector-overview", { sourceLayer: "place" })
+      .map((feature) => feature.properties)
+      .filter((properties) => /Taiwan|中华民国|台湾/.test(JSON.stringify(properties)));
+    return {
+      sourceFeatures,
+      countryTextField: map.getLayoutProperty("world-vector-country-label", "text-field"),
+      placeTextField: map.getLayoutProperty("world-vector-place-label", "text-field")
+    };
+  });
+  if (!taiwanLabelState.sourceFeatures.length
+      || !JSON.stringify(taiwanLabelState.countryTextField).includes("台湾省")
+      || !JSON.stringify(taiwanLabelState.placeTextField).includes("台湾省")) {
+    throw new Error(`Taiwan was not normalized to 台湾省 in every global overview label layer: ${JSON.stringify(taiwanLabelState)}`);
+  }
+  await movementPage.screenshot({ path: path.join(outputDir, "world-overview-taiwan-province.png") });
   await movementPage.close();
 
   await browser.close();
