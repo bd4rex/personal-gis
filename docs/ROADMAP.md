@@ -14,16 +14,15 @@
 - HGT elevation, Terrarium terrain, hillshade, contours, weather, nautical, emergency, Wikipedia, and Wikivoyage layers.
 - Cache-first resource inventory, real maintenance queue state, measured progress, updates, rollback, and storage classification.
 - Daily verified personal backups and schema-v4 disconnected recovery kits containing Nominatim and OSM Carto snapshots.
-- Health, API lifecycle, resource-console, main-map, world-map, and isolated recovery tests.
+- Layered health, API lifecycle, resource-console, main-map, world-map, performance, and isolated recovery tests, plus automated bilingual-document parity and link checks.
 
 ## Near-term priorities
 
 1. Move performance-sensitive runtime assets and renewable build scratch from Windows bind mounts to Linux-native Docker volumes while retaining validated host-side recovery copies.
-2. Add automated bilingual-document parity and link checks to the test workflow.
-3. Establish explicit tagged releases after the historical milestone documentation is accepted.
-4. Improve local search latency, query cancellation, and UI debounce under limited memory.
-5. Add a supported workflow for extending shared search/routing scope without silently retaining removed regions.
-6. Complete the isolated OSM incremental-update experiment and keep full snapshots as the disaster-recovery baseline.
+2. Establish explicit tagged releases after the historical milestone documentation is accepted.
+3. Improve local search latency, query cancellation, and UI debounce under limited memory.
+4. Add a supported workflow for extending shared search/routing scope without silently retaining removed regions.
+5. Complete the isolated OSM incremental-update experiment and keep full snapshots as the disaster-recovery baseline.
 
 ## Medium-term work
 

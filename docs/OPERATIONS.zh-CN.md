@@ -51,15 +51,16 @@ D:\GISS\smoke-test.cmd
 
 功能测试会创建、更新、搜索并删除临时个人记录，还检查区域包、地址、反向地址、路线、海拔、地形、应急、Kiwix、统一搜索、GPX、媒体、导出和清理。
 
-浏览器测试：
+统一测试入口按成本分为四层：
 
 ```powershell
-docker build -f D:\GISS\services\tools\ui-test\Dockerfile -t giss-ui-test:1 D:\GISS
-docker run --rm --network container:giss-web -e GISS_UI_URL=http://127.0.0.1 -v D:\GISS\runtime\ui-smoke:/work/runtime/ui-smoke giss-ui-test:1
-docker run --rm --network container:giss-web -e GISS_UI_URL=http://127.0.0.1 -v D:\GISS\runtime\ui-smoke:/work/runtime/ui-smoke --entrypoint node giss-ui-test:1 tests/world-map-smoke.cjs
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile static
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile browser
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile full
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile recovery
 ```
 
-截图写入 `runtime/ui-smoke`。
+`static` 不依赖运行服务，并在 GitHub PR 上自动执行；`browser` 增加健康与四类 Playwright 回归；`full` 再增加 API、资源和个人数据生命周期；`recovery` 最后执行隔离断网恢复演练。完整用例、前置条件、副作用和证据位置见[测试用例集](../tests/README.zh-CN.md)。截图写入 `runtime/ui-smoke` 和 `runtime/resource-console-smoke`。性能测试自动读取 `tests/performance-baseline.json`，输出当前值相对 2026-08-07 三次测试中位数的差异，并使用保存的宽松上限拦截显著退化。
 
 ## 地图与资源管理
 

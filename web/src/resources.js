@@ -449,7 +449,7 @@ function catalogRegion(regionId) {
 
 function catalogRegionName(region) {
   if (!region) return "";
-  const fallback = { JP: "日本", TW: "台湾地区", HK: "香港特别行政区", MO: "澳门特别行政区", RU: "俄罗斯" };
+  const fallback = { JP: "日本", TW: "台湾省", HK: "香港特别行政区", MO: "澳门特别行政区", RU: "俄罗斯" };
   if (fallback[region.isoCode]) return fallback[region.isoCode];
   if (region.isoCode && typeof Intl.DisplayNames === "function") {
     try { return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(region.isoCode) || region.name; } catch {}

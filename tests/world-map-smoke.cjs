@@ -60,6 +60,14 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!japanCoverage.includes("日本") || !japanCoverage.includes("未安装")) {
     throw new Error(`Map source control did not reflect Japan offline coverage: ${japanCoverage}`);
   }
+  await page.locator("#mapSourceCloseButton").click();
+  await page.locator("#legendShortcut").click();
+  const overviewLegend = await page.locator("#legendPopover").innerText();
+  if (!overviewLegend.includes("离线全球概览") || !overviewLegend.includes("全球低缩放概览") || !overviewLegend.includes("国家边界")) {
+    throw new Error(`Global overview legend did not describe the visible low-zoom map: ${overviewLegend}`);
+  }
+  await page.locator("#legendCloseButton").click();
+  await page.locator("#onlineMapShortcut").click();
   await page.screenshot({ path: path.join(outputDir, "map-source-menu-japan.png") });
   await page.locator('#mapSourcePopover [data-online-provider="osm"]').click();
   if (await page.locator("#onlineMapShortcut").getAttribute("aria-pressed") !== "true") {
@@ -75,6 +83,12 @@ fs.mkdirSync(outputDir, { recursive: true });
       && toastBox.y + toastBox.height > shortcutBox.y;
     if (overlaps) throw new Error("Map source toast overlaps the source shortcut.");
   }
+  await page.locator("#legendShortcut").click();
+  const onlineOsmLegend = await page.locator("#legendPopover").innerText();
+  if (!onlineOsmLegend.includes("OSM 标准地图已连接") || !onlineOsmLegend.includes("OSM Carto 栅格样式")) {
+    throw new Error(`Online OSM legend did not follow the source switch: ${onlineOsmLegend}`);
+  }
+  await page.locator("#legendCloseButton").click();
   await page.screenshot({ path: path.join(outputDir, "world-region-online.png") });
 
   await page.locator('[data-tab="layers"]').click();
@@ -83,6 +97,12 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (await page.locator('[data-tab-panel="layers"] [data-theme].active').count() !== 0) {
     throw new Error("An offline base-map style still appears active while OpenFreeMap is rendering.");
   }
+  await page.locator("#legendShortcut").click();
+  const openFreeMapLegend = await page.locator("#legendPopover").innerText();
+  if (!openFreeMapLegend.includes("OpenFreeMap") || !openFreeMapLegend.includes("交互矢量样式")) {
+    throw new Error(`OpenFreeMap legend did not follow the source switch: ${openFreeMapLegend}`);
+  }
+  await page.locator("#legendCloseButton").click();
   await page.screenshot({ path: path.join(outputDir, "world-region-openfreemap.png") });
   await page.locator('[data-tab-panel="layers"] [data-theme="osm-carto"]').click();
   if (await page.locator("#onlineMapShortcut").getAttribute("aria-pressed") !== "false") {
@@ -209,7 +229,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   await taiwanPage.goto(`${baseUrl}/?coverage=gf-taiwan`, { waitUntil: "load" });
   await taiwanPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 30000 });
   const taiwanPrompt = await taiwanPage.locator("#coveragePromptTitle").textContent();
-  if (!taiwanPrompt.includes("台湾") || /Taiwan/i.test(taiwanPrompt)) {
+  if (!taiwanPrompt.includes("台湾省未安装") || /Taiwan/i.test(taiwanPrompt)) {
     throw new Error(`Taiwan offline prompt was not localized: ${taiwanPrompt}`);
   }
   await taiwanPage.locator("#onlineMapShortcut").click();
@@ -370,6 +390,30 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!automaticJapanPrompt.includes("日本") || /Kyūshū|Kyushu/i.test(automaticJapanPrompt)) {
     throw new Error(`Tokyo did not resolve through the country polygon: ${automaticJapanPrompt}`);
   }
+  await movementPage.goto(`${baseUrl}/?lon=121&lat=23.7&zoom=3&overview-regression=taiwan-label`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => {
+    const map = window.__gissMapInstance;
+    if (!map?.loaded() || !map.getLayer("world-vector-country-label")) return false;
+    return map.querySourceFeatures("world-vector-overview", { sourceLayer: "place" })
+      .some((feature) => /Taiwan|中华民国|台湾/.test(JSON.stringify(feature.properties)));
+  }, null, { timeout: 30000 });
+  const taiwanLabelState = await movementPage.evaluate(() => {
+    const map = window.__gissMapInstance;
+    const sourceFeatures = map.querySourceFeatures("world-vector-overview", { sourceLayer: "place" })
+      .map((feature) => feature.properties)
+      .filter((properties) => /Taiwan|中华民国|台湾/.test(JSON.stringify(properties)));
+    return {
+      sourceFeatures,
+      countryTextField: map.getLayoutProperty("world-vector-country-label", "text-field"),
+      placeTextField: map.getLayoutProperty("world-vector-place-label", "text-field")
+    };
+  });
+  if (!taiwanLabelState.sourceFeatures.length
+      || !JSON.stringify(taiwanLabelState.countryTextField).includes("台湾省")
+      || !JSON.stringify(taiwanLabelState.placeTextField).includes("台湾省")) {
+    throw new Error(`Taiwan was not normalized to 台湾省 in every global overview label layer: ${JSON.stringify(taiwanLabelState)}`);
+  }
+  await movementPage.screenshot({ path: path.join(outputDir, "world-overview-taiwan-province.png") });
   await movementPage.close();
 
   await browser.close();

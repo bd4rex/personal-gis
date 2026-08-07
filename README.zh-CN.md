@@ -71,6 +71,8 @@ D:\GISS\health-check.cmd
 D:\GISS\smoke-test.cmd
 ```
 
+后续开发使用分层的[测试用例集](tests/README.zh-CN.md)：`static` 适合每次提交，`browser` 覆盖地图与资源界面，`full` 增加 API 和个人数据生命周期，`recovery` 增加隔离断网恢复演练。
+
 `start-giss.cmd` 会在需要时创建本地密钥、启动 Docker Desktop、应用有序 PostGIS 迁移、构建 API 镜像、启动核心服务和已准备的高级服务，并启动白名单维护任务工作器。
 
 准备或重建高级离线能力：

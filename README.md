@@ -71,6 +71,8 @@ D:\GISS\health-check.cmd
 D:\GISS\smoke-test.cmd
 ```
 
+Ongoing development uses the layered [test suite](tests/README.md): `static` for every commit, `browser` for map and resource UI coverage, `full` for API and personal-data lifecycles, and `recovery` for the isolated disconnected recovery drill.
+
 `start-giss.cmd` creates local secrets when required, starts Docker Desktop, applies ordered PostGIS migrations, builds the API image, starts the core stack, enables prepared advanced services, and starts the allowlisted maintenance worker.
 
 Prepare or rebuild advanced offline capabilities:

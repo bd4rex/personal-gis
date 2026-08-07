@@ -6,6 +6,8 @@ RUN npm install --no-save --save-exact playwright@1.61.1
 COPY tests/ui-smoke.cjs /work/tests/ui-smoke.cjs
 COPY tests/world-map-smoke.cjs /work/tests/world-map-smoke.cjs
 COPY tests/resource-console-smoke.cjs /work/tests/resource-console-smoke.cjs
+COPY tests/performance-smoke.cjs /work/tests/performance-smoke.cjs
+COPY tests/performance-baseline.json /work/tests/performance-baseline.json
 
 ENV GISS_UI_URL=http://giss-web
 CMD ["node", "/work/tests/ui-smoke.cjs"]

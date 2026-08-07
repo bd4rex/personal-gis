@@ -29,6 +29,10 @@ if (-not $imageReady) {
   Assert-NativeSuccess "Building the Osmium/JQ helper image"
 }
 New-Item -ItemType Directory -Force -Path $directory, $locationCache, $runtime | Out-Null
+$jqProgram = Join-Path $runtime "weather-locations.lf.jq"
+$jqSource = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "weather-locations.jq")
+$jqSource = $jqSource.Replace("`r`n", "`n").Replace("`r", "`n")
+[IO.File]::WriteAllText($jqProgram, $jqSource, $utf8NoBom)
 
 $installedInputs = @()
 $locations = New-Object System.Collections.Generic.List[object]
@@ -66,7 +70,7 @@ foreach ($dataset in @($catalog.datasets)) {
       Assert-NativeSuccess "Exporting weather cities from $id"
       $jsonLines = & docker run --rm --entrypoint jq -v "${root}:/data" $image --seq -s `
         --arg regionId $id --arg regionName ([string]$dataset.shortName) `
-        --from-file /data/scripts/weather-locations.jq "/data/runtime/weather-locations/$id.geojsonseq"
+        --from-file /data/runtime/weather-locations/weather-locations.lf.jq "/data/runtime/weather-locations/$id.geojsonseq"
       Assert-NativeSuccess "Selecting representative weather cities for $id"
       $json = (($jsonLines -join "`n") -replace '^[\x00-\x1f]+', '').Trim()
       if (-not $json) { throw "No representative weather cities were produced for $id." }

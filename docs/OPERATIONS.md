@@ -68,15 +68,16 @@ D:\GISS\smoke-test.cmd
 
 This creates, updates, searches, and deletes temporary personal records; verifies regional packs, geocoding, reverse geocoding, route geometry/instructions/profile, point elevation, terrain PNGs, emergency references, Kiwix, unified search, GPX, media, export, and cleanup.
 
-Browser test:
+The unified test entry point has four cost levels:
 
 ```powershell
-docker build -f D:\GISS\services\tools\ui-test\Dockerfile -t giss-ui-test:1 D:\GISS
-docker run --rm --network container:giss-web -e GISS_UI_URL=http://127.0.0.1 -v D:\GISS\runtime\ui-smoke:/work/runtime/ui-smoke giss-ui-test:1
-docker run --rm --network container:giss-web -e GISS_UI_URL=http://127.0.0.1 -v D:\GISS\runtime\ui-smoke:/work/runtime/ui-smoke --entrypoint node giss-ui-test:1 tests/world-map-smoke.cjs
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile static
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile browser
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile full
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\GISS\tests\run-suite.ps1 -Profile recovery
 ```
 
-Screenshots are written to `runtime/ui-smoke`. The main test checks real map rendering, clickable base-feature details, nearby lookup and clustering, collection management and assignment, personal details/media state, regional pack verification/switching, offline reference search, readiness metadata, OpenStreetMap attribution, editing, theme switching, and non-overlapping narrow layout controls. The targeted world-map test checks an uninstalled region's catalog search, world location, persistent Chinese coverage prompt, three-way source switching, online fallback, visual-center offline coverage, and return to the exact offline build target.
+`static` needs no running services and runs automatically on GitHub pull requests. `browser` adds health and all four Playwright regressions; `full` also exercises API, resource, and personal-data lifecycles; `recovery` finishes with the isolated disconnected recovery drill. See the [test suite](../tests/README.md) for the complete cases, prerequisites, side effects, and evidence locations. Screenshots are written to `runtime/ui-smoke` and `runtime/resource-console-smoke`. The performance test reads `tests/performance-baseline.json`, reports each run against the median of three measurements recorded on 2026-08-07, and applies intentionally wide guardrails for material regressions. The main test checks real map rendering, clickable base-feature details, nearby lookup and clustering, collection management and assignment, personal details/media state, regional pack verification/switching, offline reference search, readiness metadata, OpenStreetMap attribution, editing, theme switching, and non-overlapping narrow layout controls. The targeted world-map test checks an uninstalled region's catalog search, world location, persistent Chinese coverage prompt, three-way source switching, online fallback, visual-center offline coverage, and return to the exact offline build target.
 
 ## Map and resource manager
 

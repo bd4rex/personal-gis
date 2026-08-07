@@ -15,6 +15,7 @@
 | 配置 | [Configuration](CONFIGURATION.md) | [配置](CONFIGURATION.zh-CN.md) |
 | 数据流水线 | [Data pipeline](DATA_PIPELINE.md) | [数据流水线](DATA_PIPELINE.zh-CN.md) |
 | 运维 | [Operations](OPERATIONS.md) | [运维](OPERATIONS.zh-CN.md) |
+| 测试用例集 | [Test suite](../tests/README.md) | [测试用例集](../tests/README.zh-CN.md) |
 | 从零重建 | [Rebuild from scratch](REBUILD.md) | [从零重建](REBUILD.zh-CN.md) |
 | 离线恢复 | [Offline recovery](OFFLINE_RECOVERY.md) | [离线恢复](OFFLINE_RECOVERY.zh-CN.md) |
 | 资源生命周期 | [Resource and version management](RESOURCE_AND_VERSION_MANAGEMENT.md) | [资源与版本管理](RESOURCE_AND_VERSION_MANAGEMENT.zh-CN.md) |
