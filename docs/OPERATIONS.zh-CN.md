@@ -30,6 +30,14 @@ D:\GISS\prepare-advanced.cmd
 
 命令围绕已校验产品保持幂等：合并已安装区域为共享能力 PBF，准备百科、旅行指南、全球概览、天气与航海，构建路线和海拔，并启动高级 Compose 配置。OSM Carto 通过 `scripts\build-osm-carto.ps1` 独立构建。
 
+独立重建 z0-7 全球矢量底图：
+
+```powershell
+D:\GISS\build-world-overview-vector.cmd
+```
+
+首次运行会缓存 Natural Earth 官方 GeoPackage。构建先写入 staged 文件，校验 PMTiles 文件头和最小体积后才替换 `web/assets/overview/world-overview.pmtiles`，并把 SHA256 写入 `overview.manifest.json`。浏览器将该内容哈希附加到 Range 请求，防止更新后的归档继续复用旧 PMTiles 字节缓存。
+
 16 GiB 主机不得并发重建 Valhalla 和 Nominatim。正常启动复用活动路线归档、Nominatim 卷和 OSM Carto 数据库。
 
 ## 健康与功能测试
@@ -61,7 +69,7 @@ docker run --rm --network container:giss-web -e GISS_UI_URL=http://127.0.0.1 -v 
 - **本地**：统计地图、来源、搜索/路线、地形、知识、个人数据、备份和缓存；
 - **可更新**：检查地图、共享索引、目录、概览、天气、航海与知识产品。
 
-主地图始终有 Natural Earth 全球概览。“在全球地图定位”会保留精确目录选择。来源菜单提供“仅离线、OSM Standard、OpenFreeMap”，并显示实际来源和当前覆盖；在线来源失败时依次回退到备用在线源和本地概览，且不会批量缓存。
+主地图在 z0-7 始终有 Natural Earth 110m/50m/10m 多级矢量概览。区域 OSM 在其上补充细节，但不会移除未安装区域的全球道路、边界、河流和地名骨架。z8 以下隐藏自动下载建议，100km 全球浏览不会再弹出日本、美国等区域提示；“在全球地图定位”仍可强制保留精确目录选择。来源菜单提供“仅离线、OSM Standard、OpenFreeMap”，并显示实际来源和当前覆盖；在线来源失败时依次回退到备用在线源和本地概览，且不会批量缓存。
 
 资源页面先读取 `data\maintenance\resource-inventory-cache.json`，再由单个后台线程刷新。可获取目录和维护队列独立显示，慢速磁盘扫描不会遮住任务。
 
@@ -214,4 +222,4 @@ Range 命令应返回 `206 Partial Content`。
 - 密码变化：运行 `start-giss.cmd` 同步角色并应用迁移。
 - 区域构建中断：只清理暂存文件和对应临时目录，不删除已安装 PMTiles。
 - 共享索引中断：确认没有活动任务后才能清理候选缓存，不删除 `.env` 指向的活动卷/路径。
-- 路线或地形不可用：检查活动 Valhalla 归档、`elevation_data` 和容器日志；地形 PNG 可再生。
+- 路线或地形不可用：检查活动 Valhalla 归档、`products/elevation` 和容器日志；可运行 `powershell -ExecutionPolicy Bypass -File scripts/sync-elevation.ps1` 补齐所有已启用区域的全球来源 HGT，高程生成的地形 PNG 可再生。

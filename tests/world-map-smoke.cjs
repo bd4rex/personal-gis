@@ -113,6 +113,37 @@ fs.mkdirSync(outputDir, { recursive: true });
     throw new Error("Online OSM view did not turn off.");
   }
 
+  const cartoLagPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  let cartoLagTileRequests = 0;
+  let cartoLagVectorRequests = 0;
+  cartoLagPage.on("request", (request) => {
+    if (request.url().includes("/osm-carto/tile/")) cartoLagTileRequests += 1;
+    if (request.url().includes("/tiles/jiangsu.pmtiles")) cartoLagVectorRequests += 1;
+  });
+  await cartoLagPage.route("**/api/map-packs", async (route) => {
+    const response = await route.fetch();
+    const inventory = await response.json();
+    inventory.osmCartoPackIds = [];
+    await route.fulfill({ response, json: inventory });
+  });
+  await cartoLagPage.addInitScript(() => {
+    localStorage.setItem("giss-theme", "osm-carto");
+    localStorage.setItem("giss-online-map", "false");
+  });
+  await cartoLagPage.goto(`${baseUrl}/?lon=118.89574&lat=32.05272&zoom=9`, { waitUntil: "load" });
+  await cartoLagPage.waitForFunction(() => document.querySelector("#mapSourceStatus")?.textContent.includes("交互矢量")
+    && document.querySelector("#mapCoverageStatus")?.textContent.includes("OSM 原版后台同步中"), null, { timeout: 30000 });
+  await cartoLagPage.waitForTimeout(1800);
+  if (cartoLagTileRequests !== 0) {
+    throw new Error("An out-of-date OSM Carto renderer still requested blank raster tiles with no ready packs.");
+  }
+  if (cartoLagVectorRequests < 1) {
+    throw new Error("A newly installed region did not retain its PMTiles vector fallback while OSM Carto was synchronizing.");
+  }
+  await cartoLagPage.screenshot({ path: path.join(outputDir, "pending-carto-vector-fallback.png") });
+  await cartoLagPage.unrouteAll({ behavior: "wait" });
+  await cartoLagPage.close();
+
   const fallbackPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await fallbackPage.route("https://tile.openstreetmap.org/**", (route) => route.abort("internetdisconnected"));
   await fallbackPage.addInitScript(() => {
@@ -188,6 +219,158 @@ fs.mkdirSync(outputDir, { recursive: true });
   }
   await taiwanPage.screenshot({ path: path.join(outputDir, "map-source-menu-taiwan.png") });
   await taiwanPage.close();
+
+  const movementPage = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  await movementPage.addInitScript(() => {
+    localStorage.setItem("giss-online-map", "false");
+    localStorage.setItem("giss-theme", "osm-carto");
+    window.__gissMapInstance = null;
+    Object.defineProperty(window, "maplibregl", {
+      configurable: true,
+      set(value) {
+        const MapLibreMap = value.Map;
+        value.Map = class TestMap extends MapLibreMap {
+          constructor(...args) {
+            super(...args);
+            window.__gissMapInstance = this;
+          }
+        };
+        Object.defineProperty(window, "maplibregl", { configurable: true, writable: true, value });
+      }
+    });
+  });
+  await movementPage.goto(`${baseUrl}/?lon=118.89574&lat=32.05272&zoom=6&overview-regression=1`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await movementPage.waitForTimeout(2200);
+  await movementPage.evaluate(() => {
+    const originalSetStyle = maplibregl.Map.prototype.setStyle;
+    window.__gissSetStyleCalls = 0;
+    maplibregl.Map.prototype.setStyle = function (...args) {
+      window.__gissSetStyleCalls += 1;
+      return originalSetStyle.apply(this, args);
+    };
+  });
+  const movementCanvas = movementPage.locator("canvas.maplibregl-canvas");
+  const movementBox = await movementCanvas.boundingBox();
+  if (!movementBox) throw new Error("World overview movement test could not locate the map canvas.");
+  const movementY = movementBox.y + movementBox.height / 2;
+  const movementLeft = movementBox.x + movementBox.width * 0.2;
+  const movementRight = movementBox.x + movementBox.width * 0.82;
+  await movementPage.mouse.move(movementRight, movementY);
+  await movementPage.mouse.down();
+  await movementPage.mouse.move(movementLeft, movementY, { steps: 8 });
+  await movementPage.mouse.up();
+  await movementPage.waitForTimeout(1800);
+  await movementPage.evaluate(() => {
+    if (!window.__gissMapInstance) throw new Error("The movement test did not capture the active MapLibre map.");
+    window.__gissMapInstance.jumpTo({ center: [123.29027, 32.05272], zoom: 6 });
+  });
+  await movementPage.waitForFunction(() => {
+    const map = window.__gissMapInstance;
+    if (!map || map.getLayoutProperty("local-osm-carto-raster", "visibility") !== "visible") return false;
+    return map.getStyle().layers.some((layer) => ["jiangsu", "jiangsu-details"].includes(layer.source)
+      && map.getLayoutProperty(layer.id, "visibility") !== "none");
+  }, null, { timeout: 10000 });
+  if (await movementPage.evaluate(() => window.__gissSetStyleCalls) !== 0) {
+    throw new Error("Panning still rebuilds the complete MapLibre style.");
+  }
+  if (await movementPage.locator("#coveragePrompt").isVisible()) {
+    throw new Error(`China-coast panning produced a false offline-pack prompt: ${await movementPage.locator("#coveragePromptTitle").textContent()}`);
+  }
+  const eastAttribution = await movementPage.locator(".maplibregl-ctrl-attrib-inner").textContent();
+  if (!eastAttribution.includes("Made with Natural Earth")) {
+    throw new Error("The offline world overview disappeared after panning away from an installed region.");
+  }
+  if (!(await movementPage.locator("#mapSourceStatus").textContent()).includes("离线全球概览")) {
+    throw new Error("The map source control did not switch to the persistent offline overview.");
+  }
+  const edgeLayerState = await movementPage.evaluate(() => {
+    const map = window.__gissMapInstance;
+    if (!map) throw new Error("The movement test did not capture the active MapLibre map.");
+    const localRasterVisibility = map.getLayoutProperty("local-osm-carto-raster", "visibility");
+    const jiangsuLayers = map.getStyle().layers.filter((layer) => ["jiangsu", "jiangsu-details"].includes(layer.source));
+    const visibleJiangsuLayers = jiangsuLayers.filter((layer) => map.getLayoutProperty(layer.id, "visibility") !== "none").length;
+    const bounds = map.getBounds();
+    return {
+      localRasterVisibility,
+      visibleJiangsuLayers,
+      jiangsuLayerCount: jiangsuLayers.length,
+      center: map.getCenter().toArray(),
+      bounds: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
+    };
+  });
+  if (edgeLayerState.localRasterVisibility !== "visible") {
+    throw new Error(`Panning the center outside Jiangsu hid OSM Carto while Jiangsu was still inside the viewport: ${JSON.stringify(edgeLayerState)}`);
+  }
+  if (edgeLayerState.visibleJiangsuLayers < 1) {
+    throw new Error(`Panning the center outside Jiangsu hid its vector layers while Jiangsu was still inside the viewport: ${JSON.stringify(edgeLayerState)}`);
+  }
+  await movementPage.evaluate(() => {
+    if (!window.__gissMapInstance) throw new Error("The movement test did not capture the active MapLibre map.");
+    window.__gissMapInstance.jumpTo({ center: [118.89574, 32.05272], zoom: 6 });
+  });
+  await movementPage.waitForTimeout(1800);
+  if (await movementPage.evaluate(() => window.__gissSetStyleCalls) !== 0) {
+    throw new Error("Returning to an installed region rebuilt the complete MapLibre style.");
+  }
+  if (!(await movementPage.locator("#mapCoverageStatus").textContent()).includes("江苏省已安装并启用")) {
+    throw new Error("Returning from the world overview did not restore Jiangsu coverage.");
+  }
+  await movementPage.screenshot({ path: path.join(outputDir, "world-overview-pan-return.png") });
+
+  await movementPage.goto(`${baseUrl}/?lon=-30&lat=30&zoom=6&overview-regression=2`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await movementPage.waitForTimeout(1800);
+  if (await movementPage.locator("#coveragePrompt").isVisible()) {
+    throw new Error(`The North Atlantic inherited a rectangular world-pack prompt: ${await movementPage.locator("#coveragePromptTitle").textContent()}`);
+  }
+  await movementPage.goto(`${baseUrl}/?lon=-74.006&lat=40.7128&zoom=6&overview-regression=usa`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await movementPage.waitForTimeout(1200);
+  if (await movementPage.locator("#coveragePrompt").isVisible()) {
+    throw new Error("The 100 km United States overview still displayed an automatic download prompt.");
+  }
+  await movementPage.evaluate(() => window.__gissMapInstance?.jumpTo({ zoom: 8 }));
+  await movementPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 15000 });
+  const automaticUsPrompt = await movementPage.locator("#coveragePromptTitle").textContent();
+  if (!automaticUsPrompt.includes("美国")) {
+    throw new Error(`New York did not resolve through the United States polygon: ${automaticUsPrompt}`);
+  }
+  await movementPage.goto(`${baseUrl}/?lon=139.6917&lat=35.6895&zoom=6&overview-regression=3`, { waitUntil: "load" });
+  await movementPage.waitForFunction(() => document.querySelector("#systemState")?.textContent === "本地在线", null, { timeout: 30000 });
+  await movementPage.waitForFunction(() => {
+    const map = window.__gissMapInstance;
+    if (!map?.loaded()) return false;
+    return map.queryRenderedFeatures({ layers: ["world-vector-major-road"] }).length > 0
+      && map.queryRenderedFeatures({ layers: ["world-vector-place-label"] }).length > 0;
+  }, null, { timeout: 15000 });
+  if (await movementPage.locator("#coveragePrompt").isVisible()) {
+    throw new Error("The 100 km Japan overview still displayed an automatic download prompt.");
+  }
+  const japanOverviewState = await movementPage.evaluate(() => {
+    const map = window.__gissMapInstance;
+    const layers = map.getStyle().layers;
+    const layerIndex = (id) => layers.findIndex((layer) => layer.id === id);
+    return {
+      roads: map.queryRenderedFeatures({ layers: ["world-vector-major-road"] }).length,
+      places: map.queryRenderedFeatures({ layers: ["world-vector-place-label"] }).length,
+      localRasterIndex: layerIndex("local-osm-carto-raster"),
+      worldRoadIndex: layerIndex("world-vector-major-road"),
+      worldPlaceIndex: layerIndex("world-vector-place-label")
+    };
+  });
+  if (japanOverviewState.roads < 1 || japanOverviewState.places < 1
+      || japanOverviewState.worldRoadIndex <= japanOverviewState.localRasterIndex
+      || japanOverviewState.worldPlaceIndex <= japanOverviewState.localRasterIndex) {
+    throw new Error(`The global vector skeleton was missing or covered at Japan z6: ${JSON.stringify(japanOverviewState)}`);
+  }
+  await movementPage.evaluate(() => window.__gissMapInstance?.jumpTo({ zoom: 8 }));
+  await movementPage.locator("#coveragePrompt").waitFor({ state: "visible", timeout: 15000 });
+  const automaticJapanPrompt = await movementPage.locator("#coveragePromptTitle").textContent();
+  if (!automaticJapanPrompt.includes("日本") || /Kyūshū|Kyushu/i.test(automaticJapanPrompt)) {
+    throw new Error(`Tokyo did not resolve through the country polygon: ${automaticJapanPrompt}`);
+  }
+  await movementPage.close();
 
   await browser.close();
   if (errors.length) throw new Error(errors.join("\n"));

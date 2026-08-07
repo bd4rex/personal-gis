@@ -273,7 +273,7 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (!(await page.locator("#legendPopover").isHidden())) throw new Error("Legend did not close.");
 
   await page.getByRole("button", { name: "图层" }).click();
-  await page.getByRole("button", { name: "交互矢量" }).click();
+  await page.getByRole("button", { name: "交互矢量", exact: true }).click();
   await page.waitForTimeout(1800);
   const richDetails = await page.evaluate(async () => {
     const response = await fetch("/api/map-packs", { cache: "no-store" });

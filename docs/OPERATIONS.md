@@ -30,6 +30,14 @@ D:\GISS\prepare-advanced.cmd
 
 The command is idempotent around verified products. It builds `giss-core-latest.osm.pbf` from every installed catalog pack; prepares the pinned Wikipedia and Wikivoyage ZIMs, Natural Earth overview, Open-Meteo snapshot, and OSM nautical layer; copies routing input into Valhalla; and starts the advanced Compose profile.
 
+Rebuild the independent zoom 0-7 world vector basemap with:
+
+```powershell
+D:\GISS\build-world-overview-vector.cmd
+```
+
+The first run caches the official Natural Earth GeoPackage. The staged build validates the PMTiles header and minimum size before replacing `web/assets/overview/world-overview.pmtiles`, then records its SHA256 in `overview.manifest.json`. The browser appends that content hash to range requests so an updated archive cannot reuse stale PMTiles byte ranges.
+
 On this 16 GiB host, do not rebuild Valhalla and Nominatim concurrently. A first setup should let Valhalla finish, then let Nominatim import and index. Normal starts reuse `valhalla_tiles.tar` and the persistent Nominatim volume.
 
 ## Health checks
@@ -80,7 +88,7 @@ Open **System -> Manage resources** for the OsmAnd-style management surface:
 
 Available uses a persistent split view: the left side retains the world and current hierarchy while the right side shows the selected region or map pack. Selecting a region must not replace the rest of the catalog.
 
-The main map always has a local Natural Earth world overview at low zoom. **Locate on world map** focuses an available package and keeps that exact selection in a coverage prompt. The WiFi shortcut opens **Map source**, where **Offline only**, **OSM Standard**, and **OpenFreeMap** can be selected without opening the side panel. The menu reports the source that is actually rendering and whether the current visible map center has an enabled local package. OSM automatically falls back to OpenFreeMap and then to the local overview when providers fail. Online sources are optional, clearly marked, limited to current-viewport browsing, and never bulk-cached. **Download offline map** returns to the selected package's real build action.
+The main map always has a local Natural Earth 110m/50m/10m vector overview at zoom 0-7. Regional OSM layers add detail above it without removing the global road, boundary, river, and place skeleton outside installed packages. Automatic download suggestions remain hidden below zoom 8 so 100 km world browsing is uninterrupted; **Locate on world map** can still force the exact selected package into a coverage prompt. The WiFi shortcut opens **Map source**, where **Offline only**, **OSM Standard**, and **OpenFreeMap** can be selected without opening the side panel. The menu reports the source that is actually rendering and whether the current visible map center has an enabled local package. OSM automatically falls back to OpenFreeMap and then to the local overview when providers fail. Online sources are optional, clearly marked, limited to current-viewport browsing, and never bulk-cached. **Download offline map** returns to the selected package's real build action.
 
 Opening the manager is cache-first. The last complete inventory is read from `data\maintenance\resource-inventory-cache.json`, while a single lock-protected refresh thread collects a new local/update inventory. The worker never deletes the last complete snapshot when a job finishes. Available renders from the map catalog and Updates renders from the independent maintenance snapshot, so active progress remains visible during a slow disk scan. The refresh icon starts a fresh inventory and trusted upstream check; the page polls the cached generation and replaces the view when the atomic refresh completes.
 
@@ -316,4 +324,4 @@ Normal updates import in a `giss-nominatim-candidate-*` container while `giss-no
 
 ### Route or terrain is unavailable
 
-Check `products/routing/valhalla/valhalla_tiles.tar`, `elevation_data`, and `docker logs giss-valhalla`. A normal restart should load the existing tile archive rather than rebuild. Terrain PNGs under `data/terrain-cache` are disposable and regenerate from the HGT files; cached flat PNGs are intentional neighbor tiles used to keep contour generation fast at coverage edges.
+Check `products/routing/valhalla/valhalla_tiles.tar`, `products/elevation`, and `docker logs giss-valhalla`. Run `powershell -ExecutionPolicy Bypass -File scripts/sync-elevation.ps1` to synchronize global-source HGT grids for every enabled installed region. A normal restart should load the existing tile archive rather than rebuild. Terrain PNGs under `data/terrain-cache` are disposable and regenerate from the HGT files; cached flat PNGs are intentional neighbor tiles used to keep contour generation fast at coverage edges.

@@ -161,7 +161,7 @@ try {
     Assert-NativeSuccess "Starting isolated Nominatim"
 
     $routingRoot = Join-Path $payload "products\routing\valhalla"
-    $routingElevation = Join-Path $routingRoot "elevation_data"
+    $routingElevation = Join-Path $payload "products\elevation"
     $routingWork = Join-Path $work "valhalla"
     New-Item -ItemType Directory -Force -Path $routingWork | Out-Null
     foreach ($name in @(
@@ -219,7 +219,7 @@ try {
   $advancedApiArgs = @()
   if ($kitInfo.advancedCapabilities) {
     $capabilityManifestPath = Join-Path $payload "raw\osm\china\giss-core.manifest.json"
-    $elevationRoot = Join-Path $payload "products\routing\valhalla\elevation_data"
+    $elevationRoot = Join-Path $payload "products\elevation"
     $advancedApiArgs = @(
       "-e", "CAPABILITY_MANIFEST_PATH=/data/giss-core.manifest.json",
       "-e", "NOMINATIM_URL=http://nominatim:8080",

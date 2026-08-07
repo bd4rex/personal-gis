@@ -1,12 +1,14 @@
 {
-    "schemaVersion":  1,
-    "generatedAt":  "2026-08-02T11:19:04.8098745Z",
-    "snapshot":  "Natural Earth 5.1 / raster 3.2",
+    "schemaVersion":  2,
+    "generatedAt":  "2026-08-05T16:46:31.9935835Z",
+    "snapshot":  "Natural Earth 110m/50m/10m multiscale vector",
     "sourceUrls":  [
                        "https://naturalearth.s3.amazonaws.com/50m_raster/GRAY_50M_SR_OB.zip",
-                       "https://github.com/nvkelso/natural-earth-vector"
+                       "https://naciscdn.org/naturalearth/packages/natural_earth_vector.gpkg.zip",
+                       "https://github.com/nvkelso/natural-earth-vector",
+                       "https://github.com/onthegomap/planetiler"
                    ],
-    "bytes":  2299420,
+    "bytes":  21712128,
     "files":  [
                   {
                       "name":  "countries.geojson",
@@ -22,6 +24,11 @@
                       "name":  "places.geojson",
                       "bytes":  166071,
                       "sha256":  "0dbd25c9ad8bd797ddf164b067f563be5c16be2c002254eb594862377963f9dc"
+                  },
+                  {
+                      "name":  "world-overview.pmtiles",
+                      "bytes":  19412708,
+                      "sha256":  "93b6621f7a154c2587be48b0babad05596ac26adb558a5fbbc3b9b058ba762dd"
                   }
               ],
     "attribution":  "Made with Natural Earth"

@@ -3,8 +3,8 @@ param(
   [switch]$ConfirmRebuild,
   [int]$ValhallaTimeoutMinutes = 360,
   [int]$NominatimTimeoutMinutes = 1440,
-  [ValidateRange(2, 8)][int]$BuildCpus = 4,
-  [ValidateRange(4, 10)][int]$BuildMemoryGB = 6,
+  [ValidateRange(2, 8)][int]$BuildCpus = 3,
+  [ValidateRange(4, 10)][int]$BuildMemoryGB = 5,
   [string]$MaintenanceJobId = "",
   [string]$ResumeCandidateId = ""
 )
@@ -22,7 +22,9 @@ $timestamp = if ($ResumeCandidateId) { $ResumeCandidateId } else { Get-Date -For
 $audit = Join-Path $root "runtime\index-rebuild\$timestamp"
 $capabilityRoot = Join-Path $root "raw\osm\china"
 $capabilitySource = Join-Path $capabilityRoot "giss-core-latest.osm.pbf"
+$capabilityManifestPath = Join-Path $capabilityRoot "giss-core.manifest.json"
 $activeRoutingDefault = Join-Path $root "products\routing\valhalla"
+$elevationRoot = Join-Path $root "products\elevation"
 $routingVersions = Join-Path $root "products\routing\versions"
 $candidateRouting = Join-Path $audit "candidate-valhalla"
 $candidateRoutingFinal = Join-Path $routingVersions $timestamp
@@ -239,6 +241,18 @@ try {
   if (-not $previousNominatimVolume -or -not $previousRoutingPath) { throw "The active index pointers could not be identified." }
   $report.previous = [ordered]@{ nominatimVolume = $previousNominatimVolume; valhallaPath = $previousRoutingPath }
 
+  # Migrate legacy state before the candidate source replaces the source
+  # manifest. This keeps the active coverage distinct from work in progress.
+  if ((Test-Path -LiteralPath $statePath -PathType Leaf) -and (Test-Path -LiteralPath $capabilityManifestPath -PathType Leaf)) {
+    $activeState = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    if (-not $activeState.inputs) {
+      $activeManifest = Get-Content -Raw -LiteralPath $capabilityManifestPath | ConvertFrom-Json
+      $activeState | Add-Member -NotePropertyName inputs -NotePropertyValue @($activeManifest.inputs) -Force
+      $activeState | Add-Member -NotePropertyName sourceSha256 -NotePropertyValue ([string]$activeManifest.product.sha256) -Force
+      [IO.File]::WriteAllText($statePath, ($activeState | ConvertTo-Json -Depth 8), $utf8)
+    }
+  }
+
   if ($ResumeCandidateId) {
     Write-Host "Resuming completed shared-index candidates from $ResumeCandidateId..."
     if (-not (Test-Path -LiteralPath $capabilitySource -PathType Leaf)) { throw "The shared capability source is missing." }
@@ -259,7 +273,7 @@ try {
       "-e", "use_tiles_ignore_pbf=True", "-e", "force_rebuild=False", "-e", "build_elevation=True",
       "-e", "build_admins=True", "-e", "build_time_zones=True", "-e", "build_tar=True",
       "-e", "server_threads=3", "-e", "use_default_speeds_config=True", "-e", "TZ=Asia/Shanghai",
-      "-v", "${candidateRouting}:/custom_files", $valhallaImage
+      "-v", "${candidateRouting}:/custom_files", "-v", "${elevationRoot}:/custom_files/elevation_data", $valhallaImage
     )
     & docker @resumeValhallaArgs | Out-Null
     Assert-NativeSuccess "Starting the resumable Valhalla candidate"
@@ -267,7 +281,6 @@ try {
     Test-ValhallaCoverage $candidateValhallaContainer $validationPoints
     docker stop -t 30 $candidateValhallaContainer | Out-Null
     Assert-NativeSuccess "Stopping the resumable Valhalla candidate"
-    & (Join-Path $PSScriptRoot "prune-elevation-coverage.ps1") -RoutingRoot $candidateRouting
 
     $dotenv = Read-DotEnv
     if (-not $dotenv.ContainsKey("NOMINATIM_PASSWORD") -or -not $dotenv.NOMINATIM_PASSWORD) { throw "NOMINATIM_PASSWORD is missing from services/.env." }
@@ -291,13 +304,9 @@ try {
   $validationPoints = @(Get-CapabilityValidationPoints)
 
   Write-Host "Building Valhalla candidate in isolation; active routing remains online..."
+  & (Join-Path $PSScriptRoot "sync-elevation.ps1")
   New-Item -ItemType Directory -Force -Path $candidateRouting | Out-Null
   New-CapabilitySourceLink (Join-Path $candidateRouting "giss-core-latest.osm.pbf")
-  $elevationSource = Join-Path $previousRoutingPath "elevation_data"
-  if (Test-Path -LiteralPath $elevationSource -PathType Container) {
-    robocopy $elevationSource (Join-Path $candidateRouting "elevation_data") /E /COPY:DAT /DCOPY:T /R:2 /W:2 /NFL /NDL /NJH /NJS | Out-Null
-    if ($LASTEXITCODE -gt 7) { throw "Copying reusable elevation data failed with exit code $LASTEXITCODE." }
-  }
   $valhallaArgs = @(
     "run", "-d", "--name", $candidateValhallaContainer,
     "--label", "giss.role=shared-index-candidate",
@@ -306,7 +315,7 @@ try {
     "-e", "use_tiles_ignore_pbf=False", "-e", "force_rebuild=True", "-e", "build_elevation=True",
     "-e", "build_admins=True", "-e", "build_time_zones=True", "-e", "build_tar=True",
     "-e", "server_threads=3", "-e", "use_default_speeds_config=True", "-e", "TZ=Asia/Shanghai",
-    "-v", "${candidateRouting}:/custom_files", $valhallaImage
+    "-v", "${candidateRouting}:/custom_files", "-v", "${elevationRoot}:/custom_files/elevation_data", $valhallaImage
   )
   & docker @valhallaArgs | Out-Null
   Assert-NativeSuccess "Starting the Valhalla candidate"
@@ -315,7 +324,6 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $candidateRouting "valhalla_tiles.tar") -PathType Leaf)) { throw "Valhalla candidate has no tile archive." }
   docker stop -t 30 $candidateValhallaContainer | Out-Null
   Assert-NativeSuccess "Stopping the validated Valhalla candidate"
-  & (Join-Path $PSScriptRoot "prune-elevation-coverage.ps1") -RoutingRoot $candidateRouting
   $looseTiles = Join-Path $candidateRouting "valhalla_tiles"
   if (Test-Path -LiteralPath $looseTiles -PathType Container) {
     Remove-Item -LiteralPath $looseTiles -Recurse -Force
@@ -343,6 +351,8 @@ try {
   Assert-NativeSuccess "Starting the Nominatim candidate"
   Wait-ContainerEndpoint $candidateNominatimContainer "http://127.0.0.1:8080/status" $NominatimTimeoutMinutes "Nominatim"
   }
+
+  $candidateCapabilityManifest = Get-Content -Raw -LiteralPath $capabilityManifestPath | ConvertFrom-Json
 
   Write-Host "Validating candidate databases before switching..."
   docker exec -u nominatim $candidateNominatimContainer nominatim admin --check-database
@@ -385,6 +395,8 @@ try {
     active = $report.active
     previous = $report.previous
     source = $capabilitySource
+    sourceSha256 = [string]$candidateCapabilityManifest.product.sha256
+    inputs = @($candidateCapabilityManifest.inputs)
     lastBuildMapAvailable = $true
     switchSeconds = $report.switchSeconds
   }

@@ -13,6 +13,7 @@ $sourceManifest = Join-Path $root "raw\osm\carto\installed-regions.manifest.json
 $externalRoot = Join-Path $root "raw\osm\carto\external"
 $externalConfig = Join-Path $root "config\osm-carto\external-data.local.yml"
 $localImportScript = Join-Path $root "scripts\osm-carto-import-local.sh"
+$normalizedImportScript = Join-Path $root "runtime\osm-carto-support\import-local.sh"
 $apacheConfig = Join-Path $root "services\osm-carto-apache.conf"
 $productRoot = Join-Path $root "products\osm-carto"
 $manifestPath = Join-Path $productRoot "osm-carto.manifest.json"
@@ -161,6 +162,10 @@ $externalSignature = ($externalInputs | ForEach-Object { "$($_.file):$($_.sha256
 foreach ($path in @($externalConfig, $localImportScript, $apacheConfig)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing local OSM Carto import support file: $path" }
 }
+$normalizedImportRoot = Split-Path -Parent $normalizedImportScript
+New-Item -ItemType Directory -Force -Path $normalizedImportRoot | Out-Null
+$importContents = (Get-Content -Raw -LiteralPath $localImportScript).Replace("`r`n", "`n")
+[IO.File]::WriteAllText($normalizedImportScript, $importContents, $utf8NoBom)
 
 & (Join-Path $PSScriptRoot "build-osm-carto-source.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Preparing the OSM Carto source failed." }
@@ -212,11 +217,12 @@ try {
   Assert-NativeSuccess "Creating the OSM Carto candidate volume"
   $importArgs = @(
     "run", "--rm", "--name", "giss-osm-carto-import-$timestamp", "--shm-size", "1g",
+    "--memory", "6g", "--memory-swap", "7g", "--cpus", "4",
     "--label", "giss.role=osm-carto-candidate", "--label", "giss.maintenance-job=$MaintenanceJobId",
-    "-e", "THREADS=4", "-e", "OSM2PGSQL_EXTRA_ARGS=-C 4096",
+    "-e", "THREADS=3", "-e", "OSM2PGSQL_EXTRA_ARGS=-C 3072",
     "-v", "${source}:/data/region.osm.pbf:ro", "-v", "${candidateVolume}:/data/database/",
     "-v", "${candidateCache}:/data/tiles/", "-v", "${externalRoot}:/external:ro",
-    "-v", "${externalConfig}:/repair/external-data.yml:ro", "-v", "${localImportScript}:/repair/import-local.sh:ro",
+    "-v", "${externalConfig}:/repair/external-data.yml:ro", "-v", "${normalizedImportScript}:/repair/import-local.sh:ro",
     "--entrypoint", "bash", $image, "/repair/import-local.sh"
   )
   & docker @importArgs
@@ -241,6 +247,7 @@ try {
   Write-Host "OSM_CARTO_STAGE 3/4 VERIFY"
   $candidateArgs = @(
     "run", "-d", "--name", $candidateContainer, "--shm-size", "1g",
+    "--memory", "3g", "--memory-swap", "3g", "--cpus", "2",
     "--label", "giss.role=osm-carto-candidate", "--label", "giss.maintenance-job=$MaintenanceJobId",
     "-e", "THREADS=2", "-e", "ALLOW_CORS=enabled", "-e", "AUTOVACUUM=on", "-e", "TZ=Asia/Shanghai",
     "-v", "${candidateVolume}:/data/database/", "-v", "${candidateCache}:/data/tiles/",

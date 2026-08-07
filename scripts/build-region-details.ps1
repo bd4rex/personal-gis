@@ -61,7 +61,8 @@ try {
     $bounds = (@($pack.bounds) -join ',')
     Write-Host "DETAIL_STAGE 1/3 BUILD $PackId"
     docker run --rm @dockerJobArguments `
-      -e JAVA_TOOL_OPTIONS="-Xmx4g" `
+      --memory 4g --memory-swap 5g --cpus 3 `
+      -e JAVA_TOOL_OPTIONS="-Xmx3g" `
       -v "${root}:/data" `
       $planetilerImage generate-custom `
       --schema=/data/config/planetiler/poi-details.yml `

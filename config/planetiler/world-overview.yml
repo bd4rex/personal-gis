@@ -1,0 +1,349 @@
+schema_name: GIS_P World Overview
+schema_description: Natural Earth multiscale vector basemap for uninterrupted global browsing at zoom 0-7.
+attribution: '<a href="https://www.naturalearthdata.com/">Made with Natural Earth</a>'
+version: 1
+is_overlay: false
+
+args:
+  minzoom: 0
+  maxzoom: 7
+  render_maxzoom: 7
+  force: true
+  min_feature_size: 0.25
+  min_feature_size_at_max_zoom: 0.0625
+
+sources:
+  natural_earth:
+    type: geopackage
+    url: https://naciscdn.org/naturalearth/packages/natural_earth_vector.gpkg.zip
+    local_path: /data/raw/planetiler-sources/natural_earth_vector.gpkg.zip
+    projection: EPSG:4326
+
+tag_mappings:
+  scalerank: integer
+  labelrank: integer
+  rank_max: integer
+  pop_max: long
+  adm0cap: integer
+  worldcity: integer
+  expressway: integer
+  SCALERANK: integer
+  LABELRANK: integer
+  RANK_MAX: integer
+  POP_MAX: long
+  ADM0CAP: integer
+  WORLDCITY: integer
+
+definitions:
+  land_110m: &land_110m [ne_110m_land]
+  land_50m: &land_50m [ne_50m_land]
+  land_10m: &land_10m [ne_10m_land]
+  urban_50m: &urban_50m [ne_50m_urban_areas]
+  urban_10m: &urban_10m [ne_10m_urban_areas]
+  ice_110m: &ice_110m [ne_110m_glaciated_areas]
+  ice_50m: &ice_50m [ne_50m_glaciated_areas, ne_50m_antarctic_ice_shelves_polys]
+  ice_10m: &ice_10m [ne_10m_glaciated_areas, ne_10m_antarctic_ice_shelves_polys]
+  water_110m: &water_110m [ne_110m_ocean, ne_110m_lakes]
+  water_50m: &water_50m [ne_50m_ocean, ne_50m_lakes]
+  water_10m: &water_10m [ne_10m_ocean, ne_10m_lakes]
+  country_line_110m: &country_line_110m [ne_110m_admin_0_boundary_lines_land]
+  country_line_50m: &country_line_50m [ne_50m_admin_0_boundary_lines_land]
+  country_line_10m: &country_line_10m [ne_10m_admin_0_boundary_lines_land]
+  state_line_50m: &state_line_50m [ne_50m_admin_1_states_provinces_lines]
+  state_line_10m: &state_line_10m [ne_10m_admin_1_states_provinces_lines]
+  river_50m: &river_50m [ne_50m_rivers_lake_centerlines]
+  river_10m: &river_10m [ne_10m_rivers_lake_centerlines]
+  country_110m: &country_110m [ne_110m_admin_0_countries]
+  country_50m: &country_50m [ne_50m_admin_0_countries]
+  country_10m: &country_10m [ne_10m_admin_0_countries]
+  city_50m: &city_50m [ne_50m_populated_places]
+  city_10m: &city_10m [ne_10m_populated_places]
+  state_10m: &state_10m [ne_10m_admin_1_states_provinces]
+  roads_10m: &roads_10m [ne_10m_roads]
+  rail_10m: &rail_10m [ne_10m_railroads]
+  parks_10m: &parks_10m [ne_10m_parks_and_protected_lands_area]
+
+layers:
+  - id: landcover
+    buffer: 4
+    features:
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *land_110m }
+        min_zoom: 0
+        max_zoom: 2
+        attributes: [{ key: class, value: land }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *land_50m }
+        min_zoom: 3
+        max_zoom: 4
+        attributes: [{ key: class, value: land }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *land_10m }
+        min_zoom: 5
+        max_zoom: 7
+        attributes: [{ key: class, value: land }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *urban_50m }
+        min_zoom: 4
+        max_zoom: 5
+        attributes: [{ key: class, value: urban }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *urban_10m }
+        min_zoom: 6
+        max_zoom: 7
+        attributes: [{ key: class, value: urban }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *ice_110m }
+        min_zoom: 0
+        max_zoom: 2
+        attributes: [{ key: class, value: ice }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *ice_50m }
+        min_zoom: 3
+        max_zoom: 4
+        attributes: [{ key: class, value: ice }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *ice_10m }
+        min_zoom: 5
+        max_zoom: 7
+        attributes: [{ key: class, value: ice }]
+
+  - id: park
+    buffer: 4
+    features:
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *parks_10m }
+        min_zoom: 6
+        max_zoom: 7
+        attributes:
+          - { key: class, value: park }
+          - key: name
+            coalesce: [{ tag_value: name }, { tag_value: unit_name }]
+
+  - id: water
+    buffer: 4
+    features:
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *water_110m }
+        min_zoom: 0
+        max_zoom: 2
+        attributes: [{ key: class, value: water }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *water_50m }
+        min_zoom: 3
+        max_zoom: 4
+        attributes: [{ key: class, value: water }]
+      - source: natural_earth
+        geometry: polygon
+        include_when: { '${ feature.source_layer }': *water_10m }
+        min_zoom: 5
+        max_zoom: 7
+        attributes: [{ key: class, value: water }]
+
+  - id: boundary
+    buffer: 8
+    features:
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *country_line_110m }
+        min_zoom: 0
+        max_zoom: 2
+        attributes: [{ key: admin_level, value: 2 }, { key: maritime, value: 0 }]
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *country_line_50m }
+        min_zoom: 3
+        max_zoom: 4
+        attributes: [{ key: admin_level, value: 2 }, { key: maritime, value: 0 }]
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *country_line_10m }
+        min_zoom: 5
+        max_zoom: 7
+        attributes: [{ key: admin_level, value: 2 }, { key: maritime, value: 0 }]
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *state_line_50m }
+        min_zoom: 4
+        max_zoom: 4
+        attributes: [{ key: admin_level, value: 4 }, { key: maritime, value: 0 }]
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *state_line_10m }
+        min_zoom: 5
+        max_zoom: 7
+        attributes: [{ key: admin_level, value: 4 }, { key: maritime, value: 0 }]
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.5
+        min_length_at_max_zoom: 0.125
+        tolerance: 0.5
+        tolerance_at_max_zoom: 0.125
+        buffer: 8
+
+  - id: waterway
+    buffer: 8
+    features:
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *river_50m }
+        min_zoom: 4
+        max_zoom: 5
+        attributes:
+          - { key: class, value: river }
+          - { key: name, tag_value: name }
+          - { key: 'name:zh', tag_value: name_zh }
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *river_10m }
+        min_zoom: 6
+        max_zoom: 7
+        attributes:
+          - { key: class, value: river }
+          - { key: name, tag_value: name }
+          - { key: 'name:zh', tag_value: name_zh }
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.5
+        min_length_at_max_zoom: 0.125
+        tolerance: 0.5
+        tolerance_at_max_zoom: 0.125
+        buffer: 8
+
+  - id: transportation
+    buffer: 8
+    features:
+      - source: natural_earth
+        geometry: line
+        include_when:
+          '${ feature.source_layer }': *roads_10m
+          featurecla: Road
+        min_zoom:
+          default_value: 6
+          overrides:
+            5: { scalerank: [3, 4] }
+        max_zoom: 7
+        sort_key: { tag_value: scalerank }
+        attributes:
+          - key: class
+            value:
+              motorway: { expressway: 1 }
+              trunk: { type: [Major Highway, Beltway] }
+              primary: otherwise
+          - { key: name, tag_value: name }
+          - { key: ref, tag_value: label }
+          - { key: rank, tag_value: scalerank, type: integer }
+      - source: natural_earth
+        geometry: line
+        include_when: { '${ feature.source_layer }': *rail_10m }
+        min_zoom: 6
+        max_zoom: 7
+        attributes:
+          - { key: class, value: rail }
+          - { key: rank, tag_value: scalerank, type: integer }
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.75
+        min_length_at_max_zoom: 0.25
+        tolerance: 0.75
+        tolerance_at_max_zoom: 0.125
+        buffer: 8
+
+  - id: place
+    buffer: 64
+    features:
+      - source: natural_earth
+        geometry: polygon_point_on_surface
+        include_when: { '${ feature.source_layer }': *country_110m }
+        min_zoom: 2
+        max_zoom: 3
+        sort_key: { tag_value: LABELRANK }
+        attributes:
+          - { key: class, value: country }
+          - key: name
+            coalesce: [{ tag_value: NAME_ZH }, { tag_value: NAME }, { tag_value: NAME_EN }]
+          - { key: 'name:zh', tag_value: NAME_ZH }
+          - { key: name_en, tag_value: NAME_EN }
+          - { key: rank, tag_value: LABELRANK, type: integer }
+      - source: natural_earth
+        geometry: polygon_point_on_surface
+        include_when: { '${ feature.source_layer }': *country_50m }
+        min_zoom: 4
+        max_zoom: 5
+        sort_key: { tag_value: LABELRANK }
+        attributes:
+          - { key: class, value: country }
+          - key: name
+            coalesce: [{ tag_value: NAME_ZH }, { tag_value: NAME }, { tag_value: NAME_EN }]
+          - { key: 'name:zh', tag_value: NAME_ZH }
+          - { key: name_en, tag_value: NAME_EN }
+          - { key: rank, tag_value: LABELRANK, type: integer }
+      - source: natural_earth
+        geometry: polygon_point_on_surface
+        include_when: { '${ feature.source_layer }': *country_10m }
+        min_zoom: 6
+        max_zoom: 7
+        sort_key: { tag_value: LABELRANK }
+        attributes:
+          - { key: class, value: country }
+          - key: name
+            coalesce: [{ tag_value: NAME_ZH }, { tag_value: NAME }, { tag_value: NAME_EN }]
+          - { key: 'name:zh', tag_value: NAME_ZH }
+          - { key: name_en, tag_value: NAME_EN }
+          - { key: rank, tag_value: LABELRANK, type: integer }
+      - source: natural_earth
+        geometry: point
+        include_when: { '${ feature.source_layer }': *city_50m }
+        min_zoom: 4
+        max_zoom: 5
+        sort_key: { tag_value: LABELRANK }
+        attributes:
+          - key: class
+            value:
+              city: { ADM0CAP: 1 }
+              town: otherwise
+          - key: name
+            coalesce: [{ tag_value: NAME_ZH }, { tag_value: NAME }, { tag_value: NAME_EN }]
+          - { key: 'name:zh', tag_value: NAME_ZH }
+          - { key: name_en, tag_value: NAME_EN }
+          - { key: rank, tag_value: LABELRANK, type: integer }
+      - source: natural_earth
+        geometry: point
+        include_when: { '${ feature.source_layer }': *city_10m }
+        min_zoom: 6
+        max_zoom: 7
+        sort_key: { tag_value: LABELRANK }
+        attributes:
+          - key: class
+            value:
+              city: { ADM0CAP: 1 }
+              town: otherwise
+          - key: name
+            coalesce: [{ tag_value: NAME_ZH }, { tag_value: NAME }, { tag_value: NAME_EN }]
+          - { key: 'name:zh', tag_value: NAME_ZH }
+          - { key: name_en, tag_value: NAME_EN }
+          - { key: rank, tag_value: LABELRANK, type: integer }
+      - source: natural_earth
+        geometry: polygon_point_on_surface
+        include_when: { '${ feature.source_layer }': *state_10m }
+        min_zoom: 5
+        max_zoom: 7
+        sort_key: { tag_value: labelrank }
+        attributes:
+          - { key: class, value: state }
+          - key: name
+            coalesce: [{ tag_value: name_zh }, { tag_value: name }, { tag_value: name_en }]
+          - { key: 'name:zh', tag_value: name_zh }
+          - { key: name_en, tag_value: name_en }
+          - { key: rank, tag_value: labelrank, type: integer }

@@ -103,7 +103,8 @@ try {
   $bounds = (@($pack.bounds) -join ',')
   Write-Host "Building staged $($pack.name) PMTiles..."
   docker run --rm @dockerJobArguments `
-    -e JAVA_TOOL_OPTIONS="-Xmx6g" `
+    --memory 5g --memory-swap 6g --cpus 4 `
+    -e JAVA_TOOL_OPTIONS="-Xmx4g" `
     -v "${root}:/data" `
     $planetilerImage `
     --osm-path="/data/$($sourceRelative.Replace('\', '/'))" `

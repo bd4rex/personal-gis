@@ -14,6 +14,7 @@ $image = "giss-osmium:1"
 $outputRoot = Join-Path $root "raw\osm\carto"
 $output = Join-Path $outputRoot "installed-regions.osm.pbf"
 $staged = Join-Path $outputRoot "installed-regions.staged.osm.pbf"
+$merged = Join-Path $outputRoot "installed-regions.merged.osm.pbf"
 $manifestPath = Join-Path $outputRoot "installed-regions.manifest.json"
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -68,6 +69,7 @@ $current = if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
   Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 } else { $null }
 if (-not $Force -and $current -and $current.inputSignature -eq $inputSignature -and
+    $current.deduplication -eq "time-filter-latest" -and
     (Test-Path -LiteralPath $output -PathType Leaf)) {
   Write-Host "OSM Carto source already matches $($inputs.Count) enabled installed map packs."
   Get-Item -LiteralPath $output, $manifestPath | Select-Object FullName, Length, LastWriteTime
@@ -75,18 +77,27 @@ if (-not $Force -and $current -and $current.inputSignature -eq $inputSignature -
 }
 
 Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $merged -Force -ErrorAction SilentlyContinue
 $containerInputs = @($inputs | ForEach-Object { "/data/$($_.file)" })
+$snapshotTime = [DateTime]::UtcNow.AddYears(10).ToString("yyyy-MM-ddTHH:mm:ssZ")
 try {
   Write-Host "Merging $($inputs.Count) enabled installed regions for OSM Carto..."
   docker run --rm -v "${root}:/data" $image merge @containerInputs `
-    -o /data/raw/osm/carto/installed-regions.staged.osm.pbf --overwrite
+    -o /data/raw/osm/carto/installed-regions.merged.osm.pbf --overwrite
   Assert-NativeSuccess "Merging the OSM Carto source"
+
+  Write-Host "Deduplicating overlapping regional boundaries..."
+  docker run --rm -v "${root}:/data" $image time-filter -F pbf `
+    /data/raw/osm/carto/installed-regions.merged.osm.pbf $snapshotTime `
+    -o /data/raw/osm/carto/installed-regions.staged.osm.pbf --overwrite
+  Assert-NativeSuccess "Deduplicating the OSM Carto source"
   docker run --rm -v "${root}:/data" $image fileinfo -e /data/raw/osm/carto/installed-regions.staged.osm.pbf | Out-Host
   Assert-NativeSuccess "Validating the merged OSM Carto source"
   Move-Item -LiteralPath $staged -Destination $output -Force
 }
 finally {
   Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $merged -Force -ErrorAction SilentlyContinue
 }
 
 $outputInfo = Get-Item -LiteralPath $output
@@ -95,6 +106,7 @@ $manifest = [ordered]@{
   generatedAt = (Get-Date).ToUniversalTime().ToString("o")
   scope = @($inputs.id)
   inputSignature = $inputSignature
+  deduplication = "time-filter-latest"
   inputs = $inputs
   product = [ordered]@{
     file = "raw/osm/carto/installed-regions.osm.pbf"

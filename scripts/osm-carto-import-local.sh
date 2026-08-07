@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# This file is mounted directly into Linux containers and must remain LF-only.
 set -euo pipefail
 
 mkdir -p /data/style

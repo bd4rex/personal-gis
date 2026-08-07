@@ -192,6 +192,6 @@ $payload = [ordered]@{
   datasets = @($datasets | Sort-Object groupId, name)
 }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-[IO.File]::WriteAllText($target, ($payload | ConvertTo-Json -Depth 12), $utf8NoBom)
+[IO.File]::WriteAllText($target, ($payload | ConvertTo-Json -Depth 12 -Compress), $utf8NoBom)
 Write-Host "World catalog written: $target"
 Write-Host "$($payload.regions.Count) browse regions and $($payload.datasets.Count) buildable map packs are available."

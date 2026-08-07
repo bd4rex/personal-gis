@@ -16,6 +16,7 @@ $osmiumImage = "giss-osmium:1"
 $outputDirectory = Join-Path $root "raw\osm\china"
 $output = Join-Path $outputDirectory "$OutputId-latest.osm.pbf"
 $staged = Join-Path $outputDirectory "$OutputId-staged.osm.pbf"
+$merged = Join-Path $outputDirectory "$OutputId-merged.osm.pbf"
 $manifestPath = Join-Path $outputDirectory "$OutputId.manifest.json"
 $statePath = Join-Path $outputDirectory "china.state.txt"
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
@@ -75,13 +76,21 @@ $sourceSequence = if ($sequences.Count -eq 1) { $sequences[0] } else { "mixed" }
 
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+if (Test-Path -LiteralPath $merged) { Remove-Item -LiteralPath $merged -Force }
 $containerInputs = @($inputs | ForEach-Object { "/data/$($_.relativePath)" })
+$snapshotTime = [DateTime]::UtcNow.AddYears(10).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 try {
   Write-Host "Merging $($inputs.Count) verified regional sources into $OutputId..."
   docker run --rm -v "${root}:/data" $osmiumImage merge @containerInputs `
-    -o "/data/raw/osm/china/$OutputId-staged.osm.pbf"
+    -o "/data/raw/osm/china/$OutputId-merged.osm.pbf"
   Assert-NativeSuccess "Merging the capability source"
+
+  Write-Host "Deduplicating overlapping regional boundaries..."
+  docker run --rm -v "${root}:/data" $osmiumImage time-filter -F pbf `
+    "/data/raw/osm/china/$OutputId-merged.osm.pbf" $snapshotTime `
+    -o "/data/raw/osm/china/$OutputId-staged.osm.pbf" --overwrite
+  Assert-NativeSuccess "Deduplicating the capability source"
 
   docker run --rm -v "${root}:/data" $osmiumImage fileinfo -e "/data/raw/osm/china/$OutputId-staged.osm.pbf" | Out-Host
   Assert-NativeSuccess "Reading capability-source metadata"
@@ -135,6 +144,7 @@ try {
 }
 finally {
   if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+  if (Test-Path -LiteralPath $merged) { Remove-Item -LiteralPath $merged -Force }
 }
 
 Get-Item -LiteralPath $output, $manifestPath | Select-Object FullName, Length, LastWriteTime

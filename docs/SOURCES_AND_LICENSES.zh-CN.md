@@ -80,13 +80,15 @@
 
 项目：`https://github.com/valhalla/valhalla`
 
-从共享 OSM PBF 构建驾车、骑行和步行图。HGT/SRTM 兼容文件位于 `products/routing/valhalla/elevation_data`，用于路线海拔与地形。向个人用途之外分发恢复包前要保留来源并核对海拔提供方条款。
+从共享 OSM PBF 构建驾车、骑行和步行图。HGT/SRTM 兼容文件独立保存在 `products/elevation`，用于路线海拔与地形。
+
+区域 HGT 格网来自 [AWS 开放数据 Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) 的 Mapzen Skadi 全球目录。系统按已安装地图区域下载并长期保留，避免一次性占满磁盘。向个人用途之外分发恢复包前要保留来源并核对数据条款。
 
 ## Natural Earth
 
 来源：`https://www.naturalearthdata.com/`
 
-用于全球低缩放栅格、国界和主要地点。Natural Earth 是公共领域，安装文件与校验记录在 `web/assets/overview/overview.manifest.json`。
+用于旧版低缩放栅格以及 z0-7 多级矢量 PMTiles。矢量构建按缩放切换 110m、50m、10m 的陆地、水体、国界/省界、城市、主要道路、铁路、河流、城市建成区、冰川和保护地。Natural Earth 是公共领域，安装文件与校验记录在 `web/assets/overview/overview.manifest.json`。
 
 ## Open-Meteo
 
