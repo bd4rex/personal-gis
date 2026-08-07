@@ -26,6 +26,10 @@ const state = {
   collections: [],
   mapPacks: [],
   mapPackBoundaries: {},
+  mapCountryBoundaries: {},
+  renderedPackIds: [],
+  visiblePackIds: new Set(),
+  layerPackIds: new Map(),
   activePackId: null,
   viewPackId: "all",
   verifiedPackIds: new Set(),
@@ -41,9 +45,12 @@ const state = {
   onlineFallbackAnnounced: false,
   onlineStatusTimer: null,
   onlineRetryTimer: null,
+  localBaseMapMode: "unknown",
+  osmCartoPackIds: null,
   coveragePromptPackId: null,
   coveragePromptDismissedId: null,
   coveragePromptPinnedId: null,
+  coveragePromptPinnedUntil: 0,
   terrainDemSource: null,
   layerGroups: new Map(),
   layerVisibility: {
@@ -168,6 +175,73 @@ function activeDataset() {
 
 function renderingMapCatalog() {
   return { ...state.catalog, datasets: state.catalog?.datasets?.filter((dataset) => dataset.installed !== false && dataset.enabled !== false) || [] };
+}
+
+function mapStyleCatalog(datasets) {
+  return { ...state.catalog, datasets };
+}
+
+function indexRenderedPackLayers(style) {
+  const renderedIds = new Set(state.renderedPackIds);
+  state.layerPackIds = new Map((style.layers || []).flatMap((layer) => {
+    const sourceId = typeof layer.source === "string" ? layer.source : "";
+    const packId = state.renderedPackIds.find((id) => sourceId === id || sourceId === `${id}-details`);
+    return packId && renderedIds.has(packId) ? [[layer.id, packId]] : [];
+  }));
+}
+
+function packBoundsIntersectViewport(pack, viewport = state.map?.getBounds()) {
+  if (!viewport || !Array.isArray(pack?.bounds) || pack.bounds.length !== 4) return false;
+  const packWest = Number(pack.bounds[0]);
+  const packSouth = Number(pack.bounds[1]);
+  let packEast = Number(pack.bounds[2]);
+  const packNorth = Number(pack.bounds[3]);
+  const viewportWest = Number(viewport.getWest());
+  const viewportSouth = Number(viewport.getSouth());
+  let viewportEast = Number(viewport.getEast());
+  const viewportNorth = Number(viewport.getNorth());
+  if (![packWest, packSouth, packEast, packNorth, viewportWest, viewportSouth, viewportEast, viewportNorth].every(Number.isFinite)) {
+    return false;
+  }
+  if (packNorth < viewportSouth || packSouth > viewportNorth) return false;
+  if (packEast < packWest) packEast += 360;
+  if (viewportEast < viewportWest) viewportEast += 360;
+  if (viewportEast - viewportWest >= 360) return true;
+  return [-360, 0, 360].some((offset) => packWest + offset <= viewportEast && packEast + offset >= viewportWest);
+}
+
+function viewportMapPackIds() {
+  const installed = renderingMapCatalog().datasets;
+  if (!state.map) return new Set(installed.map((dataset) => dataset.id));
+  const zoom = state.map.getZoom();
+  if (zoom < 5) return new Set();
+  const viewport = state.map.getBounds();
+  return new Set(installed.filter((dataset) => packBoundsIntersectViewport(dataset, viewport)).map((dataset) => dataset.id));
+}
+
+function syncMapPackLayerVisibilityForViewport() {
+  if (!state.map?.isStyleLoaded()) return;
+  const nextIds = viewportMapPackIds();
+  const unchanged = nextIds.size === state.visiblePackIds.size
+    && [...nextIds].every((id) => state.visiblePackIds.has(id));
+  if (unchanged) return;
+  state.visiblePackIds = nextIds;
+  applyLayerVisibility();
+}
+
+function syncMapStyleForInstalledPacks() {
+  if (!state.map?.isStyleLoaded()) return false;
+  const datasets = renderingMapCatalog().datasets;
+  const nextIds = datasets.map((dataset) => dataset.id).sort();
+  const currentIds = [...state.renderedPackIds].sort();
+  if (nextIds.length === currentIds.length && nextIds.every((id, index) => id === currentIds[index])) return false;
+  const generated = window.GissMapStyle.create(mapStyleCatalog(datasets), state.theme);
+  state.renderedPackIds = nextIds;
+  state.visiblePackIds = new Set(nextIds);
+  state.layerGroups = generated.groups;
+  indexRenderedPackLayers(generated.style);
+  state.map.setStyle(generated.style, { diff: false });
+  return true;
 }
 
 function createOnlineVectorStyle(theme = state.theme) {
@@ -531,7 +605,7 @@ function resourceTypeState(type) {
   return { label: resourceStatusLabel(type.support), tone: type.support === "ready" ? "ready" : type.support === "partial" ? "partial" : "" };
 }
 
-function renderResourceTypeRow(type, override = null, actionEnabled = true) {
+function renderResourceTypeRow(type, override = null, actionEnabled = true, forceInstall = false) {
   const status = override || resourceTypeState(type);
   const localItem = type.inventoryId ? localResourceItem(type.inventoryId) : null;
   const job = type.installResourceId ? maintenanceJobFor(type.installResourceId) : null;
@@ -547,8 +621,8 @@ function renderResourceTypeRow(type, override = null, actionEnabled = true) {
       </div>`;
   }
   let action = "";
-  if (!installed && type.installResourceId) {
-    action = `<button class="command-button" type="button" data-resource-install="${escapeHtml(type.installResourceId)}"><i data-lucide="download"></i><span>安装</span></button>`;
+  if ((!installed || forceInstall) && type.installResourceId) {
+    action = `<button class="command-button" type="button" data-resource-install="${escapeHtml(type.installResourceId)}"><i data-lucide="download"></i><span>${forceInstall ? "同步" : "安装"}</span></button>`;
   } else if (type.action && actionEnabled && installed) {
     const verb = type.delivery === "library" ? "打开" : type.delivery === "layer" ? "显示" : "使用";
     action = `<button class="icon-button resource-row-action" type="button" data-resource-action="${escapeHtml(type.action)}" title="${verb}${escapeHtml(type.name)}" aria-label="${verb}${escapeHtml(type.name)}"><i data-lucide="${actionIcons[type.action] || "arrow-right"}"></i></button>`;
@@ -618,7 +692,7 @@ function renderPackResources(pack) {
       <span class="resource-row-status ${osmCartoReady ? "ready" : "partial"}">${osmCartoReady ? "已覆盖" : "待同步"}</span>
     </div>`,
     renderResourceTypeRow(resourceType("road-map"), pack.installed ? { label: "样式就绪", tone: "ready" } : { label: "需先安装地图", tone: "partial" }, pack.installed),
-    renderResourceTypeRow(resourceType("contours"), terrainReady ? { label: "本地 HGT 已覆盖", tone: "ready" } : { label: "该区域尚无高程数据", tone: "partial" }, terrainReady),
+    renderResourceTypeRow(resourceType("contours"), terrainReady ? { label: "本地 HGT 已覆盖", tone: "ready" } : { label: "该区域尚无高程数据", tone: "partial" }, terrainReady, !terrainReady),
     `<div class="resource-type-row">
       <span class="resource-row-icon"><i data-lucide="search"></i></span>
       <span class="resource-row-copy"><strong>搜索与路线</strong><span>共享地址检索和 Valhalla 路线索引</span></span>
@@ -1031,7 +1105,11 @@ async function loadResourceInventory(checkUpstream = false) {
       }
     }
     state.resourceInventory = await api(`/resources${checkUpstream ? "?check_upstream=true" : ""}`);
+    if (Array.isArray(state.resourceInventory?.osmCartoPackIds)) {
+      state.osmCartoPackIds = state.resourceInventory.osmCartoPackIds;
+    }
     renderRegionPacks();
+    syncLocalBaseMapForViewport();
   } catch (error) {
     showToast(`资源盘点失败：${error.message}`, true);
   } finally {
@@ -1176,10 +1254,12 @@ async function refreshMapPackStateFromResources() {
   const packStatus = await api("/map-packs").catch(() => null);
   if (!packStatus?.packs) return;
   state.mapPacks = packStatus.packs;
+  state.osmCartoPackIds = packStatus.osmCartoPackIds;
   state.mapResourceChanged = true;
   syncInstalledCatalogDatasets();
   renderViewSwitcher();
   renderRegionPacks();
+  if (!syncMapStyleForInstalledPacks()) syncLocalBaseMapForViewport();
   updateCoveragePrompt();
   showToast("地图资源已变化；切换区域时将载入新版本");
 }
@@ -1190,18 +1270,17 @@ function locateRegionPack(packId) {
   elements.resourceManagerDialog.close();
   state.coveragePromptDismissedId = null;
   state.coveragePromptPinnedId = pack.id;
+  state.coveragePromptPinnedUntil = Date.now() + 1500;
+  if (pack.installed && pack.enabled !== false) {
+    elements.coveragePrompt.hidden = true;
+  } else {
+    showCoveragePromptForPack(pack);
+  }
   state.map.fitBounds([[Number(pack.bounds[0]), Number(pack.bounds[1])], [Number(pack.bounds[2]), Number(pack.bounds[3])]], {
     padding: { top: 92, right: 72, bottom: 132, left: document.body.classList.contains("panel-collapsed") ? 72 : 400 },
     maxZoom: 7,
     duration: 700
   });
-  window.setTimeout(() => {
-    if (pack.installed && pack.enabled !== false) {
-      elements.coveragePrompt.hidden = true;
-      return;
-    }
-    showCoveragePromptForPack(pack);
-  }, 760);
 }
 
 async function verifyRegionPack(packId) {
@@ -2130,7 +2209,9 @@ function showEmergencyFeature(feature, lngLat) {
 function applyLayerVisibility() {
   for (const [layerId, groups] of state.layerGroups.entries()) {
     if (!state.map.getLayer(layerId)) continue;
-    const visible = groups.every((group) => state.layerVisibility[group] !== false);
+    const packId = state.layerPackIds.get(layerId);
+    const visible = (!packId || state.visiblePackIds.has(packId))
+      && groups.every((group) => state.layerVisibility[group] !== false);
     state.map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
   }
   syncMapShortcuts();
@@ -2173,8 +2254,56 @@ function mapCoverageAt(longitude, latitude) {
   return { installed, available: mapPackAt(longitude, latitude) };
 }
 
+function localBaseMapStatus(coordinate = null) {
+  if (state.theme === "vector") return { mode: "vector", pack: null };
+  const center = mapFocusCoordinate(coordinate);
+  if (!center) return { mode: "unknown", pack: null };
+  const longitude = Number(center.lng ?? center[0]);
+  const latitude = Number(center.lat ?? center[1]);
+  const coverage = mapCoverageAt(longitude, latitude);
+  if (!coverage.installed) return { mode: "overview", pack: null };
+  const readyIds = state.osmCartoPackIds;
+  if (!Array.isArray(readyIds)) return { mode: "osm-carto", pack: coverage.installed };
+  const readySet = new Set(readyIds);
+  const cartoPack = state.mapPacks.find((pack) => readySet.has(pack.id)
+    && pack.installed && pack.enabled !== false && coordinateInPack(longitude, latitude, pack));
+  return cartoPack
+    ? { mode: "osm-carto", pack: cartoPack }
+    : { mode: "vector-fallback", pack: coverage.installed };
+}
+
+function osmCartoPackInViewport() {
+  if (!state.map || state.theme !== "osm-carto") return null;
+  const readyIds = Array.isArray(state.osmCartoPackIds) ? new Set(state.osmCartoPackIds) : null;
+  const viewport = state.map.getBounds();
+  return state.mapPacks.find((pack) => !pack.deprecated
+    && pack.installed
+    && pack.enabled !== false
+    && (!readyIds || readyIds.has(pack.id))
+    && packBoundsIntersectViewport(pack, viewport)) || null;
+}
+
+function syncLocalBaseMapForViewport(coordinate = null) {
+  const status = localBaseMapStatus(coordinate);
+  state.localBaseMapMode = status.mode;
+  if (state.map?.getLayer("local-osm-carto-raster")) {
+    state.map.setLayoutProperty("local-osm-carto-raster", "visibility", osmCartoPackInViewport() ? "visible" : "none");
+  }
+  syncMapSourceControl();
+  return status;
+}
+
 function mapSourcePresentation() {
-  if (!state.onlineMapEnabled) return { label: "离线地图", icon: "wifi-off", tone: "offline" };
+  if (!state.onlineMapEnabled) {
+    const label = state.localBaseMapMode === "vector-fallback"
+      ? "离线交互矢量（OSM 原版同步中）"
+      : state.theme === "vector"
+        ? "离线交互矢量"
+        : state.localBaseMapMode === "osm-carto"
+          ? "离线 OSM 原版"
+          : "离线全球概览";
+    return { label, icon: "wifi-off", tone: "offline" };
+  }
   if (state.onlineMapStatus === "degraded") return { label: "在线不可用，已由离线概览补齐", icon: "wifi-off", tone: "degraded" };
   if (["loading", "fallback-loading"].includes(state.onlineMapStatus)) {
     const provider = state.onlineMapProvider === "openfreemap" ? "OpenFreeMap" : "OSM 标准地图";
@@ -2223,12 +2352,14 @@ function syncMapSourceControl() {
       ? mapCoverageAt(Number(center.lng), Number(center.lat))
       : { installed: null, available: null };
   const source = mapSourcePresentation();
+  const cartoFallback = !state.onlineMapEnabled && state.localBaseMapMode === "vector-fallback" && coverage.installed;
   const coverageLabel = coverage.installed
-    ? `${resourcePackName(coverage.installed)}已安装并启用`
+    ? `${resourcePackName(coverage.installed)}已安装并启用${cartoFallback ? " · OSM 原版后台同步中" : ""}`
     : coverage.available
       ? `${resourcePackName(coverage.available)}未安装`
       : "当前区域暂无独立离线包";
-  const offlineLabel = coverage.installed ? `离线地图：${resourcePackName(coverage.installed)}` : "离线全球概览";
+  const offlineStyle = cartoFallback ? "交互矢量（OSM 原版同步中）" : state.theme === "vector" ? "交互矢量" : "OSM 原版";
+  const offlineLabel = coverage.installed ? `离线地图：${resourcePackName(coverage.installed)} · ${offlineStyle}` : "离线全球概览";
   const title = state.onlineMapEnabled ? source.label : offlineLabel;
   elements.mapSourceStatus.textContent = title;
   elements.mapCoverageStatus.textContent = coverageLabel;
@@ -2343,20 +2474,55 @@ function coordinateInBounds(longitude, latitude, bounds) {
 }
 
 function coordinateInRing(longitude, latitude, ring) {
+  const ringLongitudes = ring.map((coordinate) => Number(coordinate[0])).filter(Number.isFinite);
+  const crossesDateLine = ringLongitudes.length > 1
+    && Math.max(...ringLongitudes) - Math.min(...ringLongitudes) > 180;
+  const normalizedLongitude = (value) => crossesDateLine && Number(value) < 0 ? Number(value) + 360 : Number(value);
+  const targetLongitude = normalizedLongitude(longitude);
   let inside = false;
   for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
-    const [currentLongitude, currentLatitude] = ring[current];
-    const [previousLongitude, previousLatitude] = ring[previous];
+    const currentLongitude = normalizedLongitude(ring[current][0]);
+    const currentLatitude = Number(ring[current][1]);
+    const previousLongitude = normalizedLongitude(ring[previous][0]);
+    const previousLatitude = Number(ring[previous][1]);
     const crossesLatitude = (currentLatitude > latitude) !== (previousLatitude > latitude);
     const crossingLongitude = ((previousLongitude - currentLongitude) * (latitude - currentLatitude))
       / (previousLatitude - currentLatitude) + currentLongitude;
-    if (crossesLatitude && longitude < crossingLongitude) inside = !inside;
+    if (crossesLatitude && targetLongitude < crossingLongitude) inside = !inside;
   }
   return inside;
 }
 
-function coordinateInPack(longitude, latitude, pack) {
-  if (!coordinateInBounds(longitude, latitude, pack.bounds)) return false;
+function boundaryFromGeometry(geometry) {
+  const boundary = { include: [], exclude: [] };
+  const appendPolygon = (polygon) => {
+    if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) return;
+    boundary.include.push(polygon[0]);
+    polygon.slice(1).filter(Array.isArray).forEach((ring) => boundary.exclude.push(ring));
+  };
+  if (geometry?.type === "Polygon") appendPolygon(geometry.coordinates);
+  if (geometry?.type === "MultiPolygon") geometry.coordinates.forEach(appendPolygon);
+  return boundary;
+}
+
+function countryBoundariesFromGeoJson(collection) {
+  const boundaries = {};
+  (collection?.features || []).forEach((feature) => {
+    const properties = feature.properties || {};
+    const countryCode = [properties.ISO_A2, properties.ISO_A2_EH, properties.POSTAL]
+      .map((value) => String(value || "").toUpperCase())
+      .find((value) => /^[A-Z]{2}$/.test(value));
+    if (!countryCode) return;
+    const boundary = boundaryFromGeometry(feature.geometry);
+    if (!boundary.include.length) return;
+    if (!boundaries[countryCode]) boundaries[countryCode] = { include: [], exclude: [] };
+    boundaries[countryCode].include.push(...boundary.include);
+    boundaries[countryCode].exclude.push(...boundary.exclude);
+  });
+  return boundaries;
+}
+
+function precisePackBoundaries(pack) {
   const candidateIds = [
     pack.id,
     ...(Array.isArray(pack.members) ? pack.members.map((member) => member.id) : []),
@@ -2365,7 +2531,17 @@ function coordinateInPack(longitude, latitude, pack) {
   const boundaries = [...new Set(candidateIds)]
     .map((id) => state.mapPackBoundaries[id])
     .filter(Boolean);
-  if (!boundaries.length) return coordinateInBounds(longitude, latitude, pack.bounds);
+  const countryCode = String(pack.countryId || "").toUpperCase();
+  if (/^[A-Z]{2}$/.test(countryCode) && state.mapCountryBoundaries[countryCode]) {
+    boundaries.push(state.mapCountryBoundaries[countryCode]);
+  }
+  return boundaries;
+}
+
+function coordinateInPack(longitude, latitude, pack) {
+  if (!coordinateInBounds(longitude, latitude, pack.bounds)) return false;
+  const boundaries = precisePackBoundaries(pack);
+  if (!boundaries.length) return pack.kind === "province";
   return boundaries.some((boundary) => {
     const included = boundary.include.some((ring) => coordinateInRing(longitude, latitude, ring));
     const excluded = boundary.exclude.some((ring) => coordinateInRing(longitude, latitude, ring));
@@ -2401,17 +2577,23 @@ function updateCoveragePrompt(coordinate = null, force = false) {
   const longitude = Number(center.lng ?? center[0]);
   const latitude = Number(center.lat ?? center[1]);
   const pinnedPack = state.mapPacks.find((pack) => pack.id === state.coveragePromptPinnedId);
-  if (pinnedPack && !pinnedPack.installed && coordinateInPack(longitude, latitude, pinnedPack)) {
+  if (pinnedPack && !pinnedPack.installed
+      && (Date.now() < state.coveragePromptPinnedUntil
+        || coordinateInPack(longitude, latitude, pinnedPack)
+        || coordinateInBounds(longitude, latitude, pinnedPack.bounds))) {
     showCoveragePromptForPack(pinnedPack);
     return;
   }
-  if (pinnedPack) state.coveragePromptPinnedId = null;
+  if (pinnedPack) {
+    state.coveragePromptPinnedId = null;
+    state.coveragePromptPinnedUntil = 0;
+  }
   const installed = state.mapPacks.some((pack) => pack.installed && pack.enabled !== false && coordinateInPack(longitude, latitude, pack));
   const pack = mapPackAt(longitude, latitude);
   if (state.coveragePromptDismissedId && state.coveragePromptDismissedId !== pack?.id) {
     state.coveragePromptDismissedId = null;
   }
-  const belowDetailZoom = state.map.getZoom() < 5;
+  const belowDetailZoom = state.map.getZoom() < 8;
   if (installed || !pack || (!force && belowDetailZoom) || (!force && state.coveragePromptDismissedId === pack.id)) {
     elements.coveragePrompt.hidden = true;
     state.coveragePromptPackId = null;
@@ -2449,6 +2631,7 @@ function applyLayerPreset(preset) {
 function useResourceAction(action) {
   if (action === "overview") {
     state.coveragePromptPinnedId = null;
+    state.coveragePromptPinnedUntil = 0;
     setOnlineMapEnabled(false, false);
     state.map.fitBounds([[-170, -60], [170, 78]], { padding: 36, duration: 700 });
     showToast("已打开全球离线概览");
@@ -2504,9 +2687,101 @@ function setLegendOpen(open) {
   }
 }
 
+function addWorldVectorOverviewLayers(map, beforeLayerId = undefined) {
+  const overview = state.resourceCatalog?.localMaps?.worldOverviewVector;
+  if (!overview?.url || map.getSource("world-vector-overview")) return [];
+  const sourceId = "world-vector-overview";
+  const maxzoom = Number(overview.maxZoom) + 1 || 8;
+  const revision = String(overview.revision || "").trim();
+  const revisionSeparator = overview.url.includes("?") ? "&" : "?";
+  const sourceUrl = `${overview.url}${revision ? `${revisionSeparator}v=${encodeURIComponent(revision)}` : ""}`;
+  const nameField = ["coalesce", ["get", "name:zh"], ["get", "name"], ["get", "name:latin"], ["get", "name_en"]];
+  map.addSource(sourceId, {
+    type: "vector",
+    url: `pmtiles://${window.location.origin}${sourceUrl}`,
+    attribution: `<a href="${escapeHtml(overview.naturalEarthUrl || "https://www.naturalearthdata.com/")}" target="_blank" rel="noreferrer">Made with Natural Earth</a>`
+  });
+  const lineGeometry = ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false];
+  const layers = [
+    {
+      id: "world-vector-landcover", type: "fill", source: sourceId, "source-layer": "landcover",
+      paint: {
+        "fill-color": ["match", ["get", "class"], "wood", "#a7c99a", "grass", "#cbdca8", "urban", "#ddd3c8", "ice", "#e8f1f2", "sand", "#eadcb9", "land", "#dde4cb", "#d8dfbd"],
+        "fill-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.28, 6, 0.56]
+      }
+    },
+    {
+      id: "world-vector-park", type: "fill", source: sourceId, "source-layer": "park", minzoom: 4,
+      paint: { "fill-color": "#bdd6ad", "fill-opacity": 0.5 }
+    },
+    {
+      id: "world-vector-water", type: "fill", source: sourceId, "source-layer": "water",
+      paint: { "fill-color": "#a8d2df", "fill-opacity": 0.96 }
+    },
+    {
+      id: "world-vector-boundary", type: "line", source: sourceId, "source-layer": "boundary",
+      filter: ["all", ["!=", ["get", "maritime"], 1]],
+      paint: {
+        "line-color": ["match", ["get", "admin_level"], 2, "#69636f", 4, "#99909b", "#b0a8ae"],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.45, 5, ["match", ["get", "admin_level"], 2, 1.25, 4, 0.75, 0.45], 7, ["match", ["get", "admin_level"], 2, 1.8, 4, 1, 0.6]],
+        "line-opacity": ["match", ["get", "admin_level"], 2, 0.88, 4, 0.65, 0.48]
+      }
+    },
+    {
+      id: "world-vector-waterway", type: "line", source: sourceId, "source-layer": "waterway", minzoom: 5,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#69a9c0", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 7, 1.1], "line-opacity": 0.78 }
+    },
+    {
+      id: "world-vector-major-road-casing", type: "line", source: sourceId, "source-layer": "transportation", minzoom: 5,
+      filter: ["all", lineGeometry, ["in", ["get", "class"], ["literal", ["motorway", "trunk", "primary"]]]],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#d6a06d", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.8, 7, 2.3], "line-opacity": 0.75 }
+    },
+    {
+      id: "world-vector-major-road", type: "line", source: sourceId, "source-layer": "transportation", minzoom: 5,
+      filter: ["all", lineGeometry, ["in", ["get", "class"], ["literal", ["motorway", "trunk", "primary"]]]],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["match", ["get", "class"], "motorway", "#e88e9d", "#f4c997"],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 7, 1.45], "line-opacity": 0.92
+      }
+    },
+    {
+      id: "world-vector-rail", type: "line", source: sourceId, "source-layer": "transportation", minzoom: 6,
+      filter: ["all", lineGeometry, ["in", ["get", "class"], ["literal", ["rail", "transit"]]]],
+      paint: { "line-color": "#777777", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.35, 7, 0.7], "line-opacity": 0.58 }
+    },
+    {
+      id: "world-vector-country-label", type: "symbol", source: sourceId, "source-layer": "place", minzoom: 2, maxzoom: 5.5,
+      filter: ["all", ["has", "name"], ["in", ["get", "class"], ["literal", ["country", "continent"]]]],
+      layout: {
+        "text-field": nameField, "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 2, 9, 5, 13], "text-padding": 4,
+        "symbol-sort-key": ["coalesce", ["get", "rank"], 20]
+      },
+      paint: { "text-color": "#323834", "text-halo-color": "rgba(250,249,244,0.9)", "text-halo-width": 1.2 }
+    },
+    {
+      id: "world-vector-place-label", type: "symbol", source: sourceId, "source-layer": "place", minzoom: 4,
+      filter: ["all", ["has", "name"], ["in", ["get", "class"], ["literal", ["state", "city", "town"]]]],
+      layout: {
+        "text-field": nameField, "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 6, 11, 7, 13], "text-padding": 3,
+        "symbol-sort-key": ["coalesce", ["get", "rank"], 20]
+      },
+      paint: { "text-color": "#26312c", "text-halo-color": "rgba(250,249,244,0.94)", "text-halo-width": 1.25 }
+    }
+  ].map((layer) => ({ ...layer, maxzoom: Math.min(Number(layer.maxzoom) || maxzoom, maxzoom) }));
+  const baseLayerIds = new Set(["world-vector-landcover", "world-vector-park", "world-vector-water"]);
+  layers.forEach((layer) => map.addLayer(layer, baseLayerIds.has(layer.id) ? beforeLayerId : undefined));
+  return layers.map((layer) => layer.id);
+}
+
 function addOfflineReferenceLayers() {
   const map = state.map;
   if (map.getSource("world-overview")) return;
+  const firstPackLayerId = map.getStyle().layers.find((layer) => state.layerPackIds.has(layer.id))?.id;
   if (map.getLayer("background")) {
     map.setPaintProperty("background", "background-color", [
       "interpolate", ["linear"], ["zoom"],
@@ -2525,7 +2800,7 @@ function addOfflineReferenceLayers() {
     source: "world-overview",
     maxzoom: 7,
     paint: {
-      "raster-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.7, 5.4, 0.58, 7, 0],
+      "raster-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.7, 4, 0.54, 5.2, 0.2, 6, 0],
       "raster-contrast": 0.16,
       "raster-brightness-min": 0.18,
       "raster-brightness-max": 0.92
@@ -2549,7 +2824,7 @@ function addOfflineReferenceLayers() {
       id: "local-osm-carto-raster",
       type: "raster",
       source: "local-osm-carto",
-      layout: { visibility: state.theme === "osm-carto" ? "visible" : "none" },
+      layout: { visibility: "none" },
       paint: { "raster-opacity": 1, "raster-fade-duration": 0 }
     });
   }
@@ -2582,7 +2857,7 @@ function addOfflineReferenceLayers() {
     maxzoom: 7,
     paint: {
       "fill-color": "#e2e8d7",
-      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.36, 5.4, 0.5, 7, 0]
+      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.36, 4, 0.28, 5, 0]
     }
   });
   map.addLayer({
@@ -2590,7 +2865,11 @@ function addOfflineReferenceLayers() {
     type: "line",
     source: "world-countries",
     maxzoom: 7,
-    paint: { "line-color": "#777d79", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 0.35, 5, 0.8], "line-opacity": 0.72 }
+    paint: {
+      "line-color": "#777d79",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 1, 0.35, 5, 0.8],
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.72, 4, 0.5, 5, 0]
+    }
   });
   map.addSource("world-places", {
     type: "geojson",
@@ -2602,7 +2881,7 @@ function addOfflineReferenceLayers() {
     type: "symbol",
     source: "world-places",
     minzoom: 2,
-    maxzoom: 7,
+    maxzoom: 5,
     filter: ["<=", ["coalesce", ["get", "scalerank"], 10], 6],
     layout: {
       "text-field": ["coalesce", ["get", "namepar"], ["get", "name"], ["get", "nameascii"]],
@@ -2612,6 +2891,7 @@ function addOfflineReferenceLayers() {
     },
     paint: { "text-color": "#26312c", "text-halo-color": "rgba(248,247,241,0.92)", "text-halo-width": 1.2 }
   });
+  const worldVectorLayerIds = addWorldVectorOverviewLayers(map, firstPackLayerId);
 
   const onlineVectorStyle = createOnlineVectorStyle();
   if (onlineVectorStyle) {
@@ -2690,7 +2970,17 @@ function addOfflineReferenceLayers() {
       || (map.getLayer("online-osm-raster") ? "online-osm-raster" : null);
     map.moveLayer("local-osm-carto-raster", onlineLayer || "weather-point");
   }
-  ["world-overview-raster", "world-country-fill", "world-country-boundaries", "world-place-labels"].forEach((id) => state.layerGroups.set(id, ["overview"]));
+  const worldVectorBaseLayerIds = new Set(["world-vector-landcover", "world-vector-park", "world-vector-water"]);
+  const worldVectorOverlayLayerIds = worldVectorLayerIds.filter((layerId) => !worldVectorBaseLayerIds.has(layerId));
+  const onlineLayerIds = new Set([
+    ...state.onlineVectorLayerIds.filter((layerId) => map.getLayer(layerId)),
+    ...(map.getLayer("online-osm-raster") ? ["online-osm-raster"] : [])
+  ]);
+  const worldVectorOverlayAnchor = map.getStyle().layers.find((layer) => onlineLayerIds.has(layer.id))?.id
+    || (map.getLayer("weather-point") ? "weather-point" : undefined);
+  worldVectorOverlayLayerIds.forEach((layerId) => map.moveLayer(layerId, worldVectorOverlayAnchor));
+  ["world-overview-raster", "world-country-fill", "world-country-boundaries", "world-place-labels", ...worldVectorLayerIds]
+    .forEach((id) => state.layerGroups.set(id, ["overview"]));
   ["weather-point", "weather-label"].forEach((id) => state.layerGroups.set(id, ["weather"]));
   ["nautical-line", "nautical-point", "nautical-label"].forEach((id) => state.layerGroups.set(id, ["nautical"]));
   watchOnlineMapConnection(state.onlinePreferredProvider);
@@ -2731,8 +3021,8 @@ function showNauticalFeature(feature, lngLat) {
 
 function addPersonalLayers() {
   const map = state.map;
-  if (map.getSource("personal-places")) return;
   addOfflineReferenceLayers();
+  if (map.getSource("personal-places")) return;
 
   map.addSource("terrain-dem", {
     type: "raster-dem",
@@ -3074,6 +3364,7 @@ function addPersonalLayers() {
     state.layerGroups.set(id, ["personal"]);
   });
   applyLayerVisibility();
+  syncLocalBaseMapForViewport();
 }
 
 async function refreshData(query = state.searchQuery) {
@@ -3160,8 +3451,9 @@ function updateCapabilities(capabilities) {
   const services = capabilities?.services || {};
   const setService = (element, service, ready = "可用") => {
     const available = Boolean(service?.available);
-    element.textContent = available ? ready : "构建中";
-    setStatusTone(element, available ? "" : "warning");
+    const expanding = available && service?.coverageComplete === false;
+    element.textContent = expanding ? "原范围可用 · 扩展中" : available ? ready : "构建中";
+    setStatusTone(element, available && !expanding ? "" : "warning");
   };
   setService(elements.geocoderState, services.geocoder);
   setService(elements.routingState, services.routing);
@@ -3508,7 +3800,7 @@ function createTerrainDemSource() {
     maxzoom: 12,
     worker: true,
     cacheSize: 128,
-    timeoutMs: 30_000
+    timeoutMs: 60_000
   });
   source.setupMaplibre(maplibregl);
   return source;
@@ -3544,9 +3836,13 @@ async function switchTheme(theme) {
   state.theme = normalizedTheme;
   localStorage.setItem("giss-theme", normalizedTheme);
   document.querySelectorAll("[data-theme]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.theme === normalizedTheme);
+    const active = button.dataset.theme === normalizedTheme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
-  const generated = window.GissMapStyle.create(renderingMapCatalog(), normalizedTheme);
+  const renderedIds = new Set(state.renderedPackIds);
+  const renderedDatasets = renderingMapCatalog().datasets.filter((dataset) => renderedIds.has(dataset.id));
+  const generated = window.GissMapStyle.create(mapStyleCatalog(renderedDatasets), normalizedTheme);
   generated.style.layers.forEach((layer) => {
     if (!state.map.getLayer(layer.id)) return;
     Object.entries(layer.paint || {}).forEach(([property, value]) => {
@@ -3570,18 +3866,20 @@ async function switchTheme(theme) {
     if (layer.filter) state.map.setFilter(layer.id, layer.filter);
     state.map.setLayerZoomRange(layer.id, layer.minzoom ?? 0, layer.maxzoom ?? 24);
   });
-  if (state.map.getLayer("local-osm-carto-raster")) {
-    state.map.setLayoutProperty("local-osm-carto-raster", "visibility", normalizedTheme === "osm-carto" ? "visible" : "none");
-  }
-  showToast(normalizedTheme === "osm-carto" ? "已切换到本地 OSM 原版渲染" : "已切换到交互矢量地图");
+  const localBase = syncLocalBaseMapForViewport();
+  showToast(normalizedTheme === "osm-carto"
+    ? localBase.mode === "vector-fallback"
+      ? `${resourcePackName(localBase.pack)}的 OSM 原版正在后台同步，当前继续使用交互矢量`
+      : "已切换到本地 OSM 原版渲染"
+    : "已切换到交互矢量地图");
 }
 
-async function checkServices() {
+async function checkServices(knownPackStatus = null) {
   try {
     const [apiStatus, martinResponse, packStatus, capabilities] = await Promise.all([
       api("/status"),
       fetch("/martin/catalog", { cache: "no-store" }),
-      api("/map-packs"),
+      knownPackStatus ? Promise.resolve(knownPackStatus) : api("/map-packs"),
       api("/capabilities")
     ]);
     if (!martinResponse.ok) throw new Error("Martin unavailable");
@@ -3590,12 +3888,14 @@ async function checkServices() {
     elements.systemState.textContent = "本地在线";
     elements.systemState.classList.remove("error");
     state.mapPacks = packStatus.packs;
+    state.osmCartoPackIds = packStatus.osmCartoPackIds;
     syncInstalledCatalogDatasets();
     if (!state.mapPacks.some((pack) => pack.id === state.activePackId && pack.installed)) {
       state.activePackId = state.mapPacks.find((pack) => pack.installed)?.id || state.activePackId;
       renderViewSwitcher();
     }
     renderRegionPacks();
+    if (!syncMapStyleForInstalledPacks()) syncLocalBaseMapForViewport();
     updateCoveragePrompt();
     updateStatus(apiStatus);
     updateCapabilities(capabilities);
@@ -3633,11 +3933,13 @@ function wireUi() {
     const packId = state.coveragePromptPackId;
     if (!packId) return;
     state.coveragePromptPinnedId = null;
+    state.coveragePromptPinnedUntil = 0;
     window.location.href = `/resources.html?pack=${encodeURIComponent(packId)}`;
   });
   elements.coverageCloseButton.addEventListener("click", () => {
     state.coveragePromptDismissedId = state.coveragePromptPackId;
     state.coveragePromptPinnedId = null;
+    state.coveragePromptPinnedUntil = 0;
     elements.coveragePrompt.hidden = true;
     syncMapSourceControl();
   });
@@ -4044,6 +4346,7 @@ function wireMap() {
   const map = state.map;
   map.on("style.load", async () => {
     addPersonalLayers();
+    syncMapPackLayerVisibilityForViewport();
     if (state.selectedMapFeature) setSelectedFeatureMarker(state.selectedMapFeature.coordinate);
     updateRouteSource();
     if (state.layerVisibility.emergency) updateEmergencyLayer();
@@ -4052,6 +4355,11 @@ function wireMap() {
     } catch (error) {
       showToast(error.message, true);
     }
+  });
+  map.on("load", () => {
+    syncMapPackLayerVisibilityForViewport();
+    syncLocalBaseMapForViewport();
+    updateCoveragePrompt();
   });
 
   map.on("mousemove", (event) => {
@@ -4173,6 +4481,8 @@ function wireMap() {
   });
   map.on("moveend", () => {
     if (state.layerVisibility.emergency) updateEmergencyLayer();
+    syncMapPackLayerVisibilityForViewport();
+    syncLocalBaseMapForViewport();
     updateCoveragePrompt();
   });
 }
@@ -4182,15 +4492,29 @@ async function init() {
   setSidePanelCollapsed(document.body.classList.contains("panel-collapsed"), false);
   icons();
   const requestParameters = new URLSearchParams(window.location.search);
-  const [catalog, resourceCatalog, worldCatalog, packStatus, packBoundaries] = await Promise.all([
-    fetch("/config/map-catalog.json", { cache: "no-store" }).then((response) => response.json()),
-    fetch("/config/resource-catalog.json", { cache: "no-store" }).then((response) => response.json()),
-    fetch("/config/world-region-catalog.json", { cache: "no-store" }).then((response) => response.json()),
+  const worldCatalogPromise = fetch("/config/world-region-catalog.json", { cache: "no-cache" })
+    .then((response) => response.json())
+    .catch(() => null);
+  const packBoundariesPromise = api("/map-pack-boundaries").catch(() => null);
+  const countryBoundariesPromise = fetch("/assets/overview/countries.geojson", { cache: "force-cache" })
+    .then((response) => response.ok ? response.json() : null)
+    .then(countryBoundariesFromGeoJson)
+    .catch(() => ({}));
+  const overviewManifestPromise = fetch("/assets/overview/overview.manifest.json", { cache: "no-cache" })
+    .then((response) => response.ok ? response.json() : null)
+    .catch(() => null);
+  const [catalog, resourceCatalog, packStatus, overviewManifest] = await Promise.all([
+    fetch("/config/map-catalog.json", { cache: "no-cache" }).then((response) => response.json()),
+    fetch("/config/resource-catalog.json", { cache: "no-cache" }).then((response) => response.json()),
     api("/map-packs").catch(() => null),
-    api("/map-pack-boundaries").catch(() => null)
+    overviewManifestPromise
   ]);
   state.catalog = catalog;
-  state.resourceCatalog = mergeResourceCatalog(resourceCatalog, worldCatalog);
+  state.resourceCatalog = mergeResourceCatalog(resourceCatalog, null);
+  const overviewVectorFile = overviewManifest?.files?.find((file) => file.name === "world-overview.pmtiles");
+  if (state.resourceCatalog.localMaps?.worldOverviewVector && overviewVectorFile?.sha256) {
+    state.resourceCatalog.localMaps.worldOverviewVector.revision = String(overviewVectorFile.sha256).slice(0, 16);
+  }
   state.resourceRegionId = state.resourceCatalog.rootRegion || "world";
   state.mapPacks = packStatus?.packs || catalog.datasets.map((dataset) => ({
     ...dataset,
@@ -4198,7 +4522,8 @@ async function init() {
     sizeMatches: dataset.preinstalled === true,
     buildReady: false
   }));
-  state.mapPackBoundaries = packBoundaries?.boundaries || {};
+  state.osmCartoPackIds = packStatus?.osmCartoPackIds || null;
+  state.mapPackBoundaries = {};
   syncInstalledCatalogDatasets();
   const preferredPackId = localStorage.getItem("giss-active-pack");
   const installedPackIds = new Set(state.mapPacks.filter((pack) => pack.installed && pack.enabled !== false).map((pack) => pack.id));
@@ -4216,13 +4541,6 @@ async function init() {
   renderRegionPacks();
   updateRoutePanel();
 
-  const protocol = new pmtiles.Protocol();
-  maplibregl.addProtocol("pmtiles", protocol.tile);
-  state.terrainDemSource = createTerrainDemSource();
-  await state.terrainDemSource.manager.loaded;
-  const generated = window.GissMapStyle.create(renderingMapCatalog(), state.theme);
-  state.layerGroups = generated.groups;
-
   const initialBounds = combinedInstalledBounds() || activeDataset()?.bounds || [114.7, 29.25, 122.25, 35.45];
   const defaultCenter = [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2];
   const requestedLongitudeText = requestParameters.get("lon") ?? requestParameters.get("lng");
@@ -4239,6 +4557,17 @@ async function init() {
   const initialZoom = Number.isFinite(requestedZoom)
     ? Math.max(state.catalog.limits.minZoom, Math.min(state.catalog.limits.maxZoom, requestedZoom))
     : 6.3;
+
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol("pmtiles", protocol.tile);
+  state.terrainDemSource = createTerrainDemSource();
+  await state.terrainDemSource.manager.loaded;
+  const initialStyleDatasets = renderingMapCatalog().datasets;
+  state.renderedPackIds = initialStyleDatasets.map((dataset) => dataset.id).sort();
+  state.visiblePackIds = new Set(state.renderedPackIds);
+  const generated = window.GissMapStyle.create(mapStyleCatalog(initialStyleDatasets), state.theme);
+  state.layerGroups = generated.groups;
+  indexRenderedPackLayers(generated.style);
 
   state.map = new maplibregl.Map({
     container: "map",
@@ -4262,6 +4591,25 @@ async function init() {
 
   wireUi();
   wireMap();
+  worldCatalogPromise.then((worldCatalog) => {
+    if (!worldCatalog) return;
+    state.resourceCatalog = mergeResourceCatalog(resourceCatalog, worldCatalog);
+    renderRegionPacks();
+    if (elements.resourceManagerDialog?.open) renderResourceManager();
+  });
+  packBoundariesPromise.then((packBoundaries) => {
+    if (!packBoundaries?.boundaries) return;
+    state.mapPackBoundaries = packBoundaries.boundaries;
+    syncMapPackLayerVisibilityForViewport();
+    syncLocalBaseMapForViewport();
+    updateCoveragePrompt();
+  });
+  countryBoundariesPromise.then((countryBoundaries) => {
+    state.mapCountryBoundaries = countryBoundaries;
+    syncMapPackLayerVisibilityForViewport();
+    syncLocalBaseMapForViewport();
+    updateCoveragePrompt();
+  });
   const requestedMapPack = requestParameters.get("pack");
   const requestedCoveragePack = requestParameters.get("coverage");
   if (requestedCoveragePack) locateRegionPack(requestedCoveragePack);
@@ -4270,7 +4618,7 @@ async function init() {
       refreshMapPackStateFromResources();
     }
   });
-  await checkServices();
+  await checkServices(packStatus);
   if (requestedMapPack) {
     window.setTimeout(() => activateRegionPack(requestedMapPack), 500);
   }

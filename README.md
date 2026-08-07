@@ -32,7 +32,7 @@ http://localhost:8080/resources.html
 | --- | --- |
 | Familiar local map | OpenStreetMap Carto rendered locally with osm2pgsql, PostGIS, Mapnik, and mod_tile |
 | Interactive regional map | Independently versioned PMTiles packages rendered by MapLibre GL JS |
-| World overview | Local Natural Earth low-zoom raster, country boundaries, and major places |
+| World overview | Local Natural Earth 110m/50m/10m vector PMTiles with land, water, boundaries, cities, major roads, rail, and rivers at zoom 0-7 |
 | Personal data | PostGIS places, collections, tracks, notes, tags, ratings, and content-addressed media |
 | Search | Lightweight local OSM reference index plus Nominatim address search and reverse geocoding |
 | Routing | Valhalla driving, cycling, and walking routes with elevation profiles |
@@ -110,7 +110,8 @@ The resource console exposes Available, Local, and Updates views. Regular update
 | `config/` | OSM Carto and Planetiler build configuration |
 | `raw/osm/` | Downloaded OSM snapshots, boundaries, state, and provenance |
 | `products/tiles/pmtiles/` | Verified regional vector-map products and manifests |
-| `products/routing/` | Valhalla graph versions and elevation data |
+| `products/routing/` | Valhalla graph versions |
+| `products/elevation/` | Retained global HGT elevation grids synchronized for installed regions |
 | `products/encyclopedia/` | Verified Kiwix ZIM archives |
 | `data/` | Personal media, exports, terrain cache, and maintenance state |
 | `backups/` | Personal PostGIS and media recovery points |

@@ -155,7 +155,7 @@ if ($advancedIncluded) {
   )) {
     Copy-PayloadFile (Join-Path $activeRouting $name) (Join-Path "products\routing\valhalla" $name)
   }
-  Copy-PayloadTree (Join-Path $activeRouting "elevation_data") "products\routing\valhalla\elevation_data"
+  Copy-PayloadTree (Join-Path $root "products\elevation") "products\elevation"
 }
 
 $images = @(

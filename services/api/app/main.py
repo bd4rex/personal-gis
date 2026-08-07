@@ -17,6 +17,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread
+from time import sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -30,6 +31,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, field_validator
+from starlette.requests import Request as StarletteRequest
 
 from app.personal_export import gpx_document
 from app.resource_support import directory_usage, read_json_file, upstream_source_states, write_json_file
@@ -107,6 +109,7 @@ RESOURCE_MANAGEMENT: dict[str, dict[str, str | bool]] = {
     "source-rollbacks": {"managementMode": "map-packs", "managementLabel": "管理版本"},
     "geocoder": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
     "routing": {"managementMode": "maintenance", "managementResourceId": "shared-capabilities", "managementLabel": "重建索引", "managementHeavy": True},
+    "terrain": {"managementMode": "maintenance", "managementResourceId": "terrain", "managementLabel": "同步已安装区域地形", "managementHeavy": True},
     "overview-map": {"managementMode": "maintenance", "managementResourceId": "overview-map", "managementLabel": "重新获取"},
     "osm-carto-renderer": {"managementMode": "maintenance", "managementResourceId": "osm-carto", "managementLabel": "同步已安装区域", "managementHeavy": True},
     "weather": {"managementMode": "maintenance", "managementResourceId": "weather", "managementLabel": "刷新天气"},
@@ -356,9 +359,11 @@ def capability_manifest() -> dict[str, Any] | None:
 
 def shared_index_scope_state() -> dict[str, Any]:
     manifest = capability_manifest() or {}
+    validation = read_json_file(SHARED_INDEX_STATE_PATH) or {}
+    active_inputs = validation.get("inputs") if isinstance(validation.get("inputs"), list) else manifest.get("inputs", [])
     indexed_sources = {
         str(item.get("id")): str(item.get("sha256") or "")
-        for item in manifest.get("inputs", [])
+        for item in active_inputs
         if isinstance(item, dict) and item.get("id")
     }
     indexed_ids = set(indexed_sources)
@@ -378,7 +383,6 @@ def shared_index_scope_state() -> dict[str, Any]:
         pack_id for pack_id, source_hash in enabled_sources.items()
         if not source_hash or indexed_sources.get(pack_id) != source_hash
     }
-    validation = read_json_file(SHARED_INDEX_STATE_PATH) or {}
     verified = (
         validation.get("strategy") == "blue-green"
         and validation.get("status") == "active"
@@ -386,7 +390,7 @@ def shared_index_scope_state() -> dict[str, Any]:
         and bool(validation.get("lastBuildMapAvailable"))
     )
     missing_ids = (enabled_ids - indexed_ids) | mismatched_ids
-    complete = bool(manifest) and not missing_ids
+    complete = bool(indexed_sources) and not missing_ids
     return {
         "complete": complete,
         "current": complete and indexed_ids == enabled_ids,
@@ -400,9 +404,10 @@ def shared_index_scope_state() -> dict[str, Any]:
     }
 
 
-def require_current_shared_index() -> None:
-    if not shared_index_scope_state()["complete"]:
-        raise HTTPException(status_code=503, detail="共享索引未覆盖全部启用地图包，请先重建搜索与路线共享索引")
+def require_usable_shared_index() -> None:
+    scope = shared_index_scope_state()
+    if not scope["verified"] or not scope["indexedPackIds"]:
+        raise HTTPException(status_code=503, detail="搜索与路线共享索引尚未就绪")
 
 
 DEFAULT_MAINTENANCE_SETTINGS = {
@@ -417,6 +422,7 @@ DEFAULT_MAINTENANCE_SETTINGS = {
 STATIC_MAINTENANCE_RESOURCES = {
     "shared-capabilities": {"label": "搜索与路线共享索引", "heavy": True},
     "osm-carto": {"label": "本地 OSM 原版渲染", "heavy": True},
+    "terrain": {"label": "全球地形与等高线", "heavy": True},
     "world-region-catalog": {"label": "全球区域目录", "heavy": False},
     "overview-map": {"label": "全球概览地图", "heavy": False},
     "weather": {"label": "天气快照", "heavy": False},
@@ -458,7 +464,7 @@ def queue_lightweight_region_derivatives(trigger: str) -> list[str]:
         for job in maintenance_jobs()
         if job.get("status") in {"queued", "running"}
     }
-    for resource_id, label in (("weather", "天气快照"), ("nautical", "航海参考")):
+    for resource_id, label in (("terrain", "全球地形与等高线"), ("weather", "天气快照"), ("nautical", "航海参考")):
         if resource_id in active_resource_ids:
             continue
         now = datetime.now().astimezone().isoformat()
@@ -469,8 +475,8 @@ def queue_lightweight_region_derivatives(trigger: str) -> list[str]:
             "action": "update",
             "operation": resource_id,
             "label": label,
-            "heavy": False,
-            "priority": 60,
+            "heavy": resource_id == "terrain",
+            "priority": 80 if resource_id == "terrain" else 60,
             "automatic": True,
             "trigger": trigger,
             "attempts": 0,
@@ -478,7 +484,7 @@ def queue_lightweight_region_derivatives(trigger: str) -> list[str]:
             "nextAttemptAt": now,
             "cancelRequested": False,
             "status": "queued",
-            "message": "启用区域范围已变化，正在同步轻量派生资源",
+            "message": "启用区域范围已变化，正在补齐离线高程" if resource_id == "terrain" else "启用区域范围已变化，正在同步轻量派生资源",
             "requestedAt": now,
             "startedAt": None,
             "finishedAt": None,
@@ -585,7 +591,7 @@ def maintenance_activity(job: dict[str, Any], log: str, stage: str) -> dict[str,
 def maintenance_progress(job: dict[str, Any], queue_position: int | None = None) -> dict[str, Any]:
     status = str(job.get("status") or "")
     if status == "queued":
-        operation_steps = {"region-pack": 5, "shared-capabilities": 5, "osm-carto": 4, "nautical": 4}
+        operation_steps = {"region-pack": 5, "shared-capabilities": 5, "osm-carto": 4, "nautical": 4, "terrain": 1}
         return {
             "kind": "queued", "percent": 0, "stage": "等待本机维护服务",
             "queuePosition": queue_position, "step": 0, "steps": operation_steps.get(str(job.get("operation")), 1),
@@ -626,6 +632,22 @@ def maintenance_progress(job: dict[str, Any], queue_position: int | None = None)
         return {
             "kind": "indeterminate", "percent": None, "stage": "准备后台候选索引",
             "queuePosition": None, "step": 0, "steps": 5, "serviceContinuity": True,
+        }
+    if job.get("operation") == "terrain":
+        log = maintenance_log_text(job)
+        markers = re.findall(r"ELEVATION_PROGRESS\s+(\d+)/(\d+)\s+([NS]\d{2}[EW]\d{3}\.hgt)", log)
+        if markers:
+            completed_value, total_value, grid_name = markers[-1]
+            completed = int(completed_value)
+            total = max(1, int(total_value))
+            return {
+                "kind": "staged", "percent": min(99, round(completed / total * 100)),
+                "stage": f"同步全球高程格网 {grid_name}", "queuePosition": None,
+                "step": completed, "steps": total, "serviceContinuity": True,
+            }
+        return {
+            "kind": "indeterminate", "percent": None, "stage": "准备全球高程资源",
+            "queuePosition": None, "step": 0, "steps": 1, "serviceContinuity": True,
         }
     if job.get("operation") == "osm-carto":
         log = maintenance_log_text(job)
@@ -954,8 +976,56 @@ def tile_intersects_elevation(z: int, x: int, y: int) -> bool:
 @lru_cache(maxsize=1)
 def empty_terrain_png() -> bytes:
     output = BytesIO()
-    Image.new("RGB", (256, 256), terrarium_value(None)).save(output, format="PNG", optimize=True)
+    Image.new("RGB", (256, 256), terrarium_value(None)).save(output, format="PNG", compress_level=3)
     return output.getvalue()
+
+
+def render_terrain_pixels(z: int, x: int, y: int) -> bytes:
+    longitudes = [tile_coordinate(z, x + (pixel_x + 0.5) / 256, y + 0.5 / 256)[0] for pixel_x in range(256)]
+    latitudes = [tile_coordinate(z, x + 0.5 / 256, y + (pixel_y + 0.5) / 256)[1] for pixel_y in range(256)]
+    longitude_floors = [math.floor(longitude) for longitude in longitudes]
+    longitude_fractions = [longitude - floor for longitude, floor in zip(longitudes, longitude_floors, strict=True)]
+    unique_longitude_floors = set(longitude_floors)
+    pixels = bytearray(256 * 256 * 3)
+    column_cache: dict[tuple[int, int], int] = {}
+    active_latitude_floor: int | None = None
+    row_grids: dict[int, tuple[int, array] | None] = {}
+
+    for pixel_y, latitude in enumerate(latitudes):
+        latitude_floor = math.floor(latitude)
+        latitude_fraction = latitude_floor + 1 - latitude
+        if latitude_floor != active_latitude_floor:
+            active_latitude_floor = latitude_floor
+            row_grids = {}
+            for longitude_floor in unique_longitude_floors:
+                folder, filename = hgt_name(longitude_floor + 0.5, latitude_floor + 0.5)
+                relative_name = resolve_hgt(folder, filename)
+                row_grids[longitude_floor] = load_hgt(relative_name) if relative_name else None
+
+        row_cache: dict[int, int] = {}
+        for pixel_x, longitude_floor in enumerate(longitude_floors):
+            loaded = row_grids[longitude_floor]
+            value = 0
+            if loaded:
+                side, samples = loaded
+                row = row_cache.get(side)
+                if row is None:
+                    row = min(side - 1, max(0, int(round(latitude_fraction * (side - 1)))))
+                    row_cache[side] = row
+                column_key = (pixel_x, side)
+                column = column_cache.get(column_key)
+                if column is None:
+                    column = min(side - 1, max(0, int(round(longitude_fractions[pixel_x] * (side - 1)))))
+                    column_cache[column_key] = column
+                sample = samples[row * side + column]
+                if sample > -32_768:
+                    value = sample
+            encoded = max(0, min(65_535, value + 32_768))
+            offset = (pixel_y * 256 + pixel_x) * 3
+            pixels[offset] = encoded // 256
+            pixels[offset + 1] = encoded % 256
+            pixels[offset + 2] = 0
+    return bytes(pixels)
 
 
 @app.get("/capabilities")
@@ -963,11 +1033,12 @@ def capabilities() -> dict[str, Any]:
     manifest = capability_manifest()
     scope = shared_index_scope_state()
     elevation_files = sum(1 for _ in ELEVATION_ROOT.rglob("*.hgt")) if ELEVATION_ROOT.is_dir() else 0
+    shared_index_usable = scope["verified"] and bool(scope["indexedPackIds"])
     return {
         "source": manifest,
         "services": {
-            "geocoder": {"available": scope["complete"] and upstream_available(NOMINATIM_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "extraPackIds": scope["extraPackIds"]},
-            "routing": {"available": scope["complete"] and upstream_available(VALHALLA_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "extraPackIds": scope["extraPackIds"]},
+            "geocoder": {"available": shared_index_usable and upstream_available(NOMINATIM_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "missingPackIds": scope["missingPackIds"], "extraPackIds": scope["extraPackIds"]},
+            "routing": {"available": shared_index_usable and upstream_available(VALHALLA_URL, "/status"), "coverageComplete": scope["complete"], "scopeCurrent": scope["current"], "verified": scope["verified"], "missingPackIds": scope["missingPackIds"], "extraPackIds": scope["extraPackIds"]},
             "encyclopedia": {"available": upstream_available(KIWIX_URL, "/wiki/")},
             "elevation": {"available": elevation_files > 0, "files": elevation_files},
         },
@@ -979,7 +1050,7 @@ def geocode(
     q: str = Query(min_length=1, max_length=200),
     limit: int = Query(default=10, ge=1, le=30),
 ) -> dict[str, Any]:
-    require_current_shared_index()
+    require_usable_shared_index()
     try:
         results = nominatim_search(q.strip(), limit)
     except UpstreamUnavailable as exc:
@@ -993,7 +1064,7 @@ def reverse_geocode(
     latitude: float = Query(ge=-90, le=90),
     zoom: int = Query(default=18, ge=3, le=18),
 ) -> dict[str, Any]:
-    require_current_shared_index()
+    require_usable_shared_index()
     try:
         item = upstream_json(
             NOMINATIM_URL,
@@ -1017,7 +1088,7 @@ def reverse_geocode(
 
 @app.post("/route")
 def create_route(payload: RouteInput) -> dict[str, Any]:
-    require_current_shared_index()
+    require_usable_shared_index()
     request_payload = {
         "locations": [
             {"lon": location.longitude, "lat": location.latitude, "type": "break", "name": location.name}
@@ -1068,7 +1139,7 @@ def elevation(
     value = elevation_at(longitude, latitude)
     if value is None:
         raise HTTPException(status_code=404, detail="该坐标暂无本地高程数据")
-    return {"longitude": longitude, "latitude": latitude, "elevation_m": value, "source": "SRTM 本地缓存"}
+    return {"longitude": longitude, "latitude": latitude, "elevation_m": value, "source": "本地全球高程格网"}
 
 
 @app.get("/terrain/{z}/{x}/{y}.png")
@@ -1083,14 +1154,8 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
         if cache_path.is_file():
             return FileResponse(cache_path, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
         if tile_intersects_elevation(z, x, y):
-            pixels = bytearray()
-            longitudes = [tile_coordinate(z, x + (pixel_x + 0.5) / 256, y + 0.5 / 256)[0] for pixel_x in range(256)]
-            latitudes = [tile_coordinate(z, x + 0.5 / 256, y + (pixel_y + 0.5) / 256)[1] for pixel_y in range(256)]
-            for latitude in latitudes:
-                for longitude in longitudes:
-                    pixels.extend(terrarium_value(elevation_at(longitude, latitude)))
             output = BytesIO()
-            Image.frombytes("RGB", (256, 256), bytes(pixels)).save(output, format="PNG", optimize=True)
+            Image.frombytes("RGB", (256, 256), render_terrain_pixels(z, x, y)).save(output, format="PNG", compress_level=3)
             content = output.getvalue()
         else:
             content = empty_terrain_png()
@@ -1704,8 +1769,40 @@ def read_osmosis_poly(path: Path) -> dict[str, list[list[list[float]]]]:
     return {"include": include, "exclude": exclude}
 
 
-@app.get("/map-pack-boundaries")
-def list_map_pack_boundaries() -> dict[str, Any]:
+def map_pack_boundary_revision() -> tuple[tuple[str, int, int], ...]:
+    polygon_root = OSM_ROOT / "polygons"
+    try:
+        paths = sorted(polygon_root.glob("*.poly"))
+    except OSError:
+        paths = []
+    revision = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            revision.append((path.name, stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            continue
+    return tuple(revision)
+
+
+def cached_json_headers(etag: str) -> dict[str, str]:
+    return {"Cache-Control": "no-cache", "ETag": etag}
+
+
+def cached_json_response(request: StarletteRequest, content: bytes, etag: str) -> Response:
+    headers = cached_json_headers(etag)
+    client_etags = {
+        candidate.strip()
+        for candidate in request.headers.get("if-none-match", "").split(",")
+        if candidate.strip()
+    }
+    if etag in client_etags or etag.strip('"') in client_etags or "*" in client_etags:
+        return Response(status_code=304, headers=headers)
+    return Response(content=content, media_type="application/json", headers=headers)
+
+
+@lru_cache(maxsize=4)
+def cached_map_pack_boundaries(_revision: tuple[tuple[str, int, int], ...]) -> tuple[bytes, str]:
     polygon_root = OSM_ROOT / "polygons"
     boundaries: dict[str, Any] = {}
     if polygon_root.is_dir():
@@ -1716,13 +1813,22 @@ def list_map_pack_boundaries() -> dict[str, Any]:
                 continue
             if boundary["include"]:
                 boundaries[path.stem] = boundary
-    return {"boundaries": boundaries}
+    content = json.dumps({"boundaries": boundaries}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return content, f'"{hashlib.sha256(content).hexdigest()}"'
 
 
-@app.get("/map-packs")
-def list_map_packs() -> dict[str, Any]:
+@app.get("/map-pack-boundaries")
+def list_map_pack_boundaries(request: StarletteRequest) -> Response:
+    content, etag = cached_map_pack_boundaries(map_pack_boundary_revision())
+    return cached_json_response(request, content, etag)
+
+
+def build_map_pack_payload() -> dict[str, Any]:
     catalog = map_catalog()
     packs = map_pack_states(catalog)
+    osm_carto_manifest = read_json_file(OSM_CARTO_MANIFEST_PATH) or {}
+    osm_carto_source = osm_carto_manifest.get("source") if isinstance(osm_carto_manifest.get("source"), dict) else {}
+    osm_carto_pack_ids = sorted({str(pack_id) for pack_id in osm_carto_source.get("regions", []) if pack_id})
     datasets_by_id = {str(item.get("id")): item for item in catalog["datasets"]}
     upstream = read_json_file(MAINTENANCE_ROOT / "upstream-state.json") or {}
     upstream_sources = upstream.get("sources") if isinstance(upstream.get("sources"), dict) else {}
@@ -1750,9 +1856,53 @@ def list_map_packs() -> dict[str, Any]:
         "provinceCount": len(provinces),
         "independentProvinceCount": sum(1 for pack in provinces if pack["installed"]),
         "coveredProvinceCount": sum(1 for pack in provinces if pack["covered"]),
+        "osmCartoPackIds": osm_carto_pack_ids,
         "packs": packs,
         "legacyPackages": legacy_map_packages(catalog, packs),
     }
+
+
+def file_revision(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+        return stat.st_size, stat.st_mtime_ns
+    except OSError:
+        return -1, -1
+
+
+def map_pack_payload_revision() -> tuple[Any, ...]:
+    return (
+        resource_inventory_revision(),
+        *(file_revision(path) for path in (MAP_CATALOG_PATH, REGION_CATALOG_PATH, WORLD_REGION_CATALOG_PATH)),
+        file_revision(MAINTENANCE_ROOT / "upstream-state.json"),
+        file_revision(OSM_CARTO_MANIFEST_PATH),
+    )
+
+
+@lru_cache(maxsize=4)
+def cached_map_pack_payload(_revision: tuple[Any, ...]) -> tuple[bytes, str]:
+    content = json.dumps(build_map_pack_payload(), ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+    return content, f'"{hashlib.sha256(content).hexdigest()}"'
+
+
+@app.get("/map-packs")
+def list_map_packs(request: StarletteRequest) -> Response:
+    content, etag = cached_map_pack_payload(map_pack_payload_revision())
+    return cached_json_response(request, content, etag)
+
+
+def warm_map_catalog_caches() -> None:
+    sleep(5)
+    try:
+        cached_map_pack_payload(map_pack_payload_revision())
+        cached_map_pack_boundaries(map_pack_boundary_revision())
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
+def schedule_map_catalog_cache_warmup() -> None:
+    Thread(target=warm_map_catalog_caches, name="map-catalog-warmup", daemon=True).start()
 
 
 @app.put("/map-packs/{pack_id}/activation")
@@ -2151,7 +2301,7 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
     verified_offline_kits = sum(1 for path in offline_kit_directories if not path.name.endswith(".failed") and offline_kit_is_verified(path))
     failed_offline_kits = sum(1 for path in offline_kit_directories if path.name.endswith(".failed"))
     unverified_offline_kits = max(0, len(offline_kit_directories) - verified_offline_kits - failed_offline_kits)
-    routing_core_bytes = max(0, routing_usage["bytes"] - elevation_usage["bytes"])
+    routing_core_bytes = routing_usage["bytes"]
 
     with pool.connection() as conn:
         database = conn.execute(
@@ -2302,7 +2452,7 @@ def build_resource_inventory(check_upstream: bool = False) -> dict[str, Any]:
                 {"id": "legacy-source-comparisons", "name": "旧版省级对照源", "icon": "archive", "bytes": legacy_source_usage["bytes"], "files": legacy_source_usage["files"], "status": "archive" if legacy_source_usage["files"] else "missing", "subtitle": "不参与当前构建，仅用于来源对照"},
                 {"id": "staged-source-downloads", "name": "待验证源下载", "icon": "download", "bytes": staged_source_usage["bytes"], "files": staged_source_usage["files"], "status": "warning" if staged_source_usage["files"] else "missing", "subtitle": "可续用的下载暂存，不是已安装资源"},
                 {"id": "geocoder", "name": "地址检索索引", "icon": "search", "bytes": None, "files": None, "status": "warning" if not shared_scope["current"] or not shared_scope["verified"] or not services_available["geocoder"] else "external", "subtitle": "Nominatim Docker 卷 · " + ("等待共享索引重建" if not shared_scope["current"] else ("服务不可用" if not services_available["geocoder"] else ("服务在线，尚未通过新版完整验证" if not shared_scope["verified"] else "蓝绿候选验证通过，服务在线")))},
-                {"id": "routing", "name": "路线规划", "icon": "route", "bytes": routing_core_bytes, "files": max(0, routing_usage["files"] - elevation_usage["files"]), "status": "missing" if routing_core_bytes == 0 else ("warning" if not shared_scope["current"] or not shared_scope["verified"] or not services_available["routing"] else "ready"), "subtitle": "Valhalla · " + ("等待共享索引重建" if not shared_scope["current"] else ("服务不可用" if not services_available["routing"] else ("服务在线，尚未通过新版完整验证" if not shared_scope["verified"] else "蓝绿候选验证通过，服务在线")))},
+                {"id": "routing", "name": "路线规划", "icon": "route", "bytes": routing_core_bytes, "files": routing_usage["files"], "status": "missing" if routing_core_bytes == 0 else ("warning" if not shared_scope["current"] or not shared_scope["verified"] or not services_available["routing"] else "ready"), "subtitle": "Valhalla · " + ("等待共享索引重建" if not shared_scope["current"] else ("服务不可用" if not services_available["routing"] else ("服务在线，尚未通过新版完整验证" if not shared_scope["verified"] else "蓝绿候选验证通过，服务在线")))},
                 {"id": "terrain", "name": "地形与等高线", "icon": "mountain-snow", "bytes": elevation_usage["bytes"], "files": elevation_usage["files"], "status": "ready" if elevation_valid else ("warning" if elevation_files else "missing"), "subtitle": f"{elevation_usage['files']} 个 HGT 格网 · " + ("尺寸有效" if elevation_valid else "需要校验")},
                 {"id": "encyclopedia", "name": "离线百科", "icon": "book-open", "bytes": encyclopedia_usage_value["bytes"], "files": encyclopedia_usage_value["files"], "status": "ready" if encyclopedia_state["valid"] and services_available["encyclopedia"] else ("warning" if encyclopedia_manifest else "missing"), "subtitle": f"中文维基百科 {encyclopedia_manifest.get('snapshot', '--')} · " + ("清单有效，服务在线" if encyclopedia_state["valid"] and services_available["encyclopedia"] else "资源或服务需检查")},
                 {"id": "overview-map", "name": "全球概览地图", "icon": "globe-2", "bytes": overview_usage["bytes"], "files": overview_usage["files"], "status": "ready" if overview_valid else ("warning" if overview_usage["files"] else "missing"), "subtitle": f"{overview_manifest.get('snapshot', 'Natural Earth')} · " + ("校验通过" if overview_valid else "需要校验")},

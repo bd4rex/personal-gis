@@ -8,6 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $externalRoot = Join-Path $root "raw\osm\carto\external"
 $externalConfig = Join-Path $root "config\osm-carto\external-data.local.yml"
 $repairScript = Join-Path $root "scripts\osm-carto-repair.sh"
+$normalizedRepairScript = Join-Path $root "runtime\osm-carto-support\repair-external.sh"
 $network = "services_default"
 $assetContainer = "giss-osm-carto-assets"
 
@@ -24,6 +25,10 @@ foreach ($name in $required) {
     throw "Missing OSM Carto external dataset: $path"
   }
 }
+$normalizedRepairRoot = Split-Path -Parent $normalizedRepairScript
+New-Item -ItemType Directory -Force -Path $normalizedRepairRoot | Out-Null
+$repairContents = (Get-Content -Raw -LiteralPath $repairScript).Replace("`r`n", "`n")
+[IO.File]::WriteAllText($normalizedRepairScript, $repairContents, (New-Object Text.UTF8Encoding($false)))
 
 if (-not (docker network ls -q --filter "name=^${network}$")) {
   docker network create $network | Out-Null
@@ -38,12 +43,24 @@ try {
     -m http.server 8090 --bind 0.0.0.0 --directory /external | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not start the local Carto dataset server." }
 
+  $assetServerReady = $false
+  for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    docker exec $assetContainer python3 -c `
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/ne_110m_admin_0_boundary_lines_land.zip', timeout=2).read(1)" *> $null
+    if ($LASTEXITCODE -eq 0) {
+      $assetServerReady = $true
+      break
+    }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $assetServerReady) { throw "The local Carto dataset server did not become ready." }
+
   $repairArgs = @(
     "run", "--rm", "--name", "giss-osm-carto-repair",
     "--network", $network, "--shm-size", "1g",
     "-v", "${DataVolume}:/data/database/",
     "-v", "${externalConfig}:/repair/external-data.yml:ro",
-    "-v", "${repairScript}:/repair/repair-external.sh:ro",
+    "-v", "${normalizedRepairScript}:/repair/repair-external.sh:ro",
     "--entrypoint", "bash", $Image, "/repair/repair-external.sh"
   )
   & docker @repairArgs

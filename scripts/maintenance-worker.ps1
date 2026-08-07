@@ -52,11 +52,17 @@ function Write-WorkerState {
 
 function Get-ActiveJob {
   param([string]$ResourceId)
+  return @(Get-ActiveJobs -ResourceId $ResourceId | Select-Object -First 1)
+}
+
+function Get-ActiveJobs {
+  param([string]$ResourceId)
+  $jobs = @()
   foreach ($path in Get-ChildItem -LiteralPath $jobsRoot -Filter "*.json" -File -ErrorAction SilentlyContinue) {
     $job = Read-JsonFile -Path $path.FullName
-    if ($job -and $job.resourceId -eq $ResourceId -and $job.status -in @("queued", "running")) { return $job }
+    if ($job -and $job.resourceId -eq $ResourceId -and $job.status -in @("queued", "running")) { $jobs += $job }
   }
-  return $null
+  return @($jobs)
 }
 
 function Restore-InterruptedJobs {
@@ -177,11 +183,18 @@ function Stop-JobCandidates {
 function Add-RegionFollowUpJobs {
   param([string]$PackId)
   $resources = @(
-    [pscustomobject]@{ Id = "weather"; Label = "天气快照" },
-    [pscustomobject]@{ Id = "nautical"; Label = "航海参考" }
+    [pscustomobject]@{ Id = "terrain"; Label = "全球地形与等高线"; Heavy = $true; Priority = 80; MaxAttempts = 3; Message = "正在补齐该区域离线高程与等高线" },
+    [pscustomobject]@{ Id = "weather"; Label = "天气快照"; Heavy = $false; Priority = 60; MaxAttempts = 3; Message = "正在同步轻量派生资源" },
+    [pscustomobject]@{ Id = "nautical"; Label = "航海参考"; Heavy = $false; Priority = 60; MaxAttempts = 3; Message = "正在同步轻量派生资源" },
+    [pscustomobject]@{ Id = "osm-carto"; Label = "本地 OSM 原版渲染"; Heavy = $true; Priority = 120; MaxAttempts = 2; Message = "正在后台同步 OSM 原版；完成前新区域继续使用交互矢量" },
+    [pscustomobject]@{ Id = "shared-capabilities"; Label = "搜索与路线共享索引"; Heavy = $true; Priority = 130; MaxAttempts = 2; Message = "正在后台扩展搜索与路线覆盖；当前地图及原覆盖范围继续可用" }
   )
   foreach ($resource in $resources) {
-    if (Get-ActiveJob -ResourceId $resource.Id) { continue }
+    $activeJobs = @(Get-ActiveJobs -ResourceId $resource.Id)
+    # A queued job reads the complete installed set when it starts. If a job is
+    # already running, retain one queued successor so a newly finished region
+    # cannot be omitted from that in-flight snapshot.
+    if (@($activeJobs | Where-Object { $_.status -eq "queued" }).Count) { continue }
     $jobId = [Guid]::NewGuid().ToString("N")
     $now = [DateTimeOffset]::Now.ToString("o")
     $job = [ordered]@{
@@ -190,16 +203,16 @@ function Add-RegionFollowUpJobs {
       action = "update"
       operation = $resource.Id
       label = $resource.Label
-      heavy = $false
-      priority = 60
+      heavy = [bool]$resource.Heavy
+      priority = [int]$resource.Priority
       automatic = $true
       trigger = "region-pack:$PackId"
       attempts = 0
-      maxAttempts = 3
+      maxAttempts = [int]$resource.MaxAttempts
       nextAttemptAt = $now
       cancelRequested = $false
       status = "queued"
-      message = "启用区域范围已变化（$PackId），正在同步轻量派生资源"
+      message = "启用区域范围已变化（$PackId），$($resource.Message)"
       requestedAt = $now
       startedAt = $null
       finishedAt = $null
@@ -265,6 +278,7 @@ function Get-JobCommand {
     "osm-carto" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "build-osm-carto.ps1"); Parameters = [ordered]@{ MaintenanceJobId = [string]$Job.id } } }
     "world-region-catalog" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-world-catalog.ps1"); Parameters = [ordered]@{} } }
     "overview-map" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-overview-resources.ps1"); Parameters = [ordered]@{} } }
+    "terrain" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-elevation.ps1"); Parameters = [ordered]@{} } }
     "weather" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "sync-weather.ps1"); Parameters = [ordered]@{} } }
     "nautical" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "build-nautical.ps1"); Parameters = [ordered]@{ MaintenanceJobId = [string]$Job.id } } }
     "encyclopedia" { return [pscustomobject]@{ Script = (Join-Path $PSScriptRoot "download-encyclopedia.ps1"); Parameters = [ordered]@{} } }

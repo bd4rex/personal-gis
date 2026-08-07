@@ -32,7 +32,7 @@ http://localhost:8080/resources.html
 | --- | --- |
 | 熟悉的本地地图 | 使用 osm2pgsql、PostGIS、Mapnik 和 mod_tile 本地渲染 OpenStreetMap Carto |
 | 可交互区域地图 | MapLibre GL JS 渲染独立版本管理的 PMTiles 区域包 |
-| 全球概览 | 本地 Natural Earth 低缩放底图、国界和主要城市 |
+| 全球概览 | 本地 Natural Earth 110m/50m/10m 多级矢量 PMTiles，z0-7 包含陆地、水体、国省界、城市、主要道路、铁路和河流 |
 | 个人数据 | PostGIS 点位、集合、轨迹、备注、标签、评分和内容寻址媒体 |
 | 搜索 | 轻量 OSM 参考索引，以及 Nominatim 地址搜索和反向地理编码 |
 | 路线 | Valhalla 驾车、骑行、步行路线与海拔剖面 |
@@ -110,7 +110,8 @@ D:\GISS\stop-giss.cmd
 | `config/` | OSM Carto 与 Planetiler 构建配置 |
 | `raw/osm/` | OSM 快照、边界、状态和来源记录 |
 | `products/tiles/pmtiles/` | 已校验区域矢量地图及清单 |
-| `products/routing/` | Valhalla 图版本与海拔数据 |
+| `products/routing/` | Valhalla 路线图版本 |
+| `products/elevation/` | 按已安装区域长期保留的全球 HGT 高程格网 |
 | `products/encyclopedia/` | 已校验 Kiwix ZIM 文件 |
 | `data/` | 个人媒体、导出、地形缓存和维护状态 |
 | `backups/` | 个人 PostGIS 与媒体恢复点 |

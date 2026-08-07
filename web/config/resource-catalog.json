@@ -2,6 +2,14 @@
   "schemaVersion": 2,
   "version": "2026-07-31",
   "localMaps": {
+    "worldOverviewVector": {
+      "name": "全球低缩放矢量底图",
+      "url": "/assets/overview/world-overview.pmtiles",
+      "minZoom": 0,
+      "maxZoom": 7,
+      "attribution": "Made with Natural Earth",
+      "naturalEarthUrl": "https://www.naturalearthdata.com/"
+    },
     "osmCarto": {
       "name": "本地 OSM 原版",
       "tiles": ["/osm-carto/tile/{z}/{x}/{y}.png"],
@@ -50,12 +58,12 @@
     { "id": "world-overview", "name": "全球概览", "level": "resource", "icon": "globe-2", "parent": "world", "status": "ready" }
   ],
   "resourceTypes": [
-    { "id": "overview-map", "name": "全球概览地图", "icon": "map", "scope": "global", "support": "ready", "inventoryId": "overview-map", "installResourceId": "overview-map", "delivery": "base-map", "action": "overview", "description": "Natural Earth 全球概览、国界与主要城市" },
+    { "id": "overview-map", "name": "全球概览地图", "icon": "map", "scope": "global", "support": "ready", "inventoryId": "overview-map", "installResourceId": "overview-map", "delivery": "base-map", "action": "overview", "description": "Natural Earth 多级全球矢量概览、国界、主要城市与交通骨架" },
     { "id": "world-altitude-correction", "name": "全球海拔校正", "icon": "mountain", "scope": "global", "support": "planned", "delivery": "component", "description": "用于修正设备高程基准；与区域等高线和地形数据相互独立" },
     { "id": "online-osm", "name": "在线标准地图", "icon": "wifi", "scope": "global", "support": "online", "delivery": "base-map", "action": "online-map", "description": "按当前视口查看 OpenStreetMap，不用于离线批量下载" },
     { "id": "standard-map", "name": "标准地图", "icon": "map", "scope": "regional", "support": "ready", "delivery": "map-pack", "action": "standard-mode", "description": "完整道路、地名、地物与兴趣点" },
     { "id": "road-map", "name": "道路地图模式", "icon": "route", "scope": "regional", "support": "ready", "delivery": "style", "action": "road-mode", "description": "使用已安装矢量包的道路优先样式" },
-    { "id": "contours", "name": "地形与等高线", "icon": "mountain-snow", "scope": "regional", "support": "partial", "inventoryId": "terrain", "delivery": "layer", "action": "contours", "description": "已下载 HGT 覆盖范围内的阴影与动态等高线" },
+    { "id": "contours", "name": "地形与等高线", "icon": "mountain-snow", "scope": "regional", "support": "ready", "inventoryId": "terrain", "installResourceId": "terrain", "delivery": "layer", "action": "contours", "description": "全球开放高程源，按已安装区域保留 HGT 阴影与动态等高线" },
       { "id": "weather", "name": "天气预报", "icon": "umbrella", "scope": "regional", "support": "ready", "inventoryId": "weather", "installResourceId": "weather", "delivery": "layer", "action": "weather", "description": "按已安装区域生成的 Open-Meteo 七日预报本地快照图层" },
     { "id": "encyclopedia", "name": "离线百科", "icon": "book-open", "scope": "global", "support": "ready", "inventoryId": "encyclopedia", "installResourceId": "encyclopedia", "delivery": "library", "action": "encyclopedia", "description": "在本地 Kiwix 中打开中文维基百科" },
     { "id": "travel-guide", "name": "旅行指南", "icon": "landmark", "scope": "global", "support": "ready", "inventoryId": "travel-guide", "installResourceId": "travel-guide", "delivery": "library", "action": "travel-guide", "description": "在本地 Kiwix 中打开中文维基导游" },

@@ -57,10 +57,21 @@ $checks.NauticalFeatures = @($nautical.features).Count
 $overview = Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8080/assets/overview/gray-earth.jpg" -TimeoutSec 20
 if ($overview.StatusCode -ne 200 -or $overview.RawContentLength -lt 1MB) { throw "Global overview raster is unavailable." }
 $checks.WorldOverview = $overview.StatusCode
+$overviewVectorRequest = [System.Net.HttpWebRequest]::Create("http://localhost:8080/assets/overview/world-overview.pmtiles")
+$overviewVectorRequest.AddRange(0, 16383)
+$overviewVectorRequest.Timeout = 20000
+$overviewVectorResponse = $overviewVectorRequest.GetResponse()
+try {
+  $overviewVectorStatus = [int]$overviewVectorResponse.StatusCode
+  if ($overviewVectorStatus -notin @(200, 206) -or $overviewVectorResponse.ContentLength -lt 127) { throw "Global vector overview is unavailable." }
+  $checks.WorldOverviewVector = $overviewVectorStatus
+} finally {
+  $overviewVectorResponse.Close()
+}
 
 $capabilities = Invoke-RestMethod -Uri "http://localhost:8080/api/capabilities" -TimeoutSec 20
-$checks.Geocoder = if (-not $capabilities.services.geocoder.available) { "not-ready" } elseif ($capabilities.services.geocoder.verified) { "ready" } else { "online-unverified" }
-$checks.Routing = if (-not $capabilities.services.routing.available) { "not-ready" } elseif ($capabilities.services.routing.verified) { "ready" } else { "online-unverified" }
+$checks.Geocoder = if (-not $capabilities.services.geocoder.available) { "not-ready" } elseif (-not $capabilities.services.geocoder.coverageComplete) { "ready-existing-scope" } elseif ($capabilities.services.geocoder.verified) { "ready" } else { "online-unverified" }
+$checks.Routing = if (-not $capabilities.services.routing.available) { "not-ready" } elseif (-not $capabilities.services.routing.coverageComplete) { "ready-existing-scope" } elseif ($capabilities.services.routing.verified) { "ready" } else { "online-unverified" }
 $checks.ElevationGrids = [int]$capabilities.services.elevation.files
 $checks.Encyclopedia = if ($capabilities.services.encyclopedia.available) { "ready" } else { "not-ready" }
 if ($capabilities.source) {

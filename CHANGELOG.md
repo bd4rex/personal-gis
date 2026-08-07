@@ -2,13 +2,54 @@
 
 > English | [简体中文](CHANGELOG.zh-CN.md)
 >
-> History reconstructed: `2026-08-03T23:12:23+08:00`
+> History updated: `2026-08-07T13:09:44+08:00`
 
 This changelog documents user-visible development milestones. It follows the human-readable grouping used by mature open-source projects and records ISO 8601 timestamps.
 
 The repository had no tags or GitHub Releases before this file was introduced. The `M0.x` labels below are retrospective documentation labels. Commit hashes and timestamps are the source of truth; no historical releases are implied.
 
-## Unreleased — automatic regional strategy propagation
+## Unreleased — resilient global browsing and regional expansion
+
+- **Development snapshot:** `2026-08-07T13:09:44+08:00`
+
+### Added
+
+- A Natural Earth 110m/50m/10m vector PMTiles overview with land, water, boundaries, places, roads, railways, and rivers through zoom 7.
+- Region-aware elevation synchronization backed by AWS Open Data Terrain Tiles, with retained HGT manifests and maintenance progress.
+- ETag-backed map-pack and boundary responses, deferred catalog loading, cache warming, and a browser performance smoke test.
+
+### Fixed
+
+- Kept the verified existing geocoder and routing scope usable while newly installed regions are still being indexed.
+- Kept a regional PMTiles vector fallback visible until OSM Carto has caught up, preventing blank maps after installing a region.
+- Deduplicated overlapping regional OSM objects before Carto, search, and routing builds.
+- Prevented map panning from rebuilding the complete MapLibre style or hiding installed layers still inside the viewport.
+- Replaced rectangular country guesses with precise country polygons, including antimeridian handling, and suppressed low-zoom false download prompts.
+- Normalized container-mounted shell scripts, waited for local Carto assets to become ready, and constrained heavy builds for a 16 GiB host.
+
+### Improved
+
+- Accelerated terrain tile generation by loading each required HGT grid once per row group instead of once per pixel.
+- Minified the generated global catalog without changing its 547 browse regions or 554 buildable datasets, and enabled nginx compression and explicit config revalidation.
+- Expanded world-map regression coverage for Carto lag, vector fallback, global movement, country selection, and persistent overview rendering.
+
+## M0.9 — Local OSM Carto rendering and cache reliability
+
+- **Commit:** [`d360249`](https://github.com/bd4rex/personal-gis/commit/d360249de86110511eb7ae5f49e8237d810f5d96)
+- **Timestamp:** `2026-08-04T16:22:49+08:00`
+- **Git status at the time:** direct `main` commit; no tag or Release
+
+### Fixed
+
+- Prewarmed candidate OSM Carto tiles, copied validated cache entries during activation, and cleared them during rollback.
+- Added dedicated Apache tile-render timeouts and nginx proxy timeouts for slow first renders.
+- Synchronized local/online map-source controls and allowed deterministic URL coordinates for regression testing.
+
+## M0.8 — Automatic regional strategy propagation
+
+- **Commit:** [`6daeff6`](https://github.com/bd4rex/personal-gis/commit/6daeff6458177b6aa6b4f2ad1fe0dc4640027653)
+- **Timestamp:** `2026-08-04T07:39:54+08:00`
+- **Merged by:** [PR #7](https://github.com/bd4rex/personal-gis/pull/7)
 
 ### Added
 

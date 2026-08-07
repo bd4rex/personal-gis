@@ -2,6 +2,8 @@ services:
   postgis:
     image: postgis/postgis@sha256:1d95a92144c40198b46908fd92ac365e85d35eaf31bfc36f06c2c09a090c0538
     container_name: giss-postgis
+    mem_limit: 1g
+    cpus: 2
     environment:
       POSTGRES_DB: personal_gis
       POSTGRES_USER: gis
@@ -21,6 +23,8 @@ services:
   martin:
     image: ghcr.io/maplibre/martin@sha256:0650e9025f5fcffdc686358114679421b5e6b0ca37b374ad8a66f14709d59d2b
     container_name: giss-martin
+    mem_limit: 512m
+    cpus: 1
     depends_on:
       postgis:
         condition: service_healthy
@@ -44,6 +48,8 @@ services:
     build:
       context: ./api
     container_name: giss-api
+    mem_limit: 1g
+    cpus: 2
     depends_on:
       postgis:
         condition: service_healthy
@@ -90,7 +96,7 @@ services:
       - ../raw/osm:/data/osm:ro
       - ../raw/osm/china/china.state.txt:/data/china.state.txt:ro
       - ../raw/osm/china/giss-core.manifest.json:/data/giss-core.manifest.json:ro
-      - ${VALHALLA_DATA_PATH:-../products/routing/valhalla}/elevation_data:/data/elevation:ro
+      - ../products/elevation:/data/elevation:ro
       - ../data/terrain-cache:/data/terrain-cache
       - ../tmp:/data/build-cache
       - ../raw/osm:/data/osm-resources:ro
@@ -116,6 +122,8 @@ services:
     profiles: ["advanced"]
     image: mediagis/nominatim@sha256:7923a8e67197fc6d4f4ecb7c0e8bbedffeddcfdf4519596fe946e46a28f5a9f8
     container_name: giss-nominatim
+    mem_limit: 3g
+    cpus: 3
     shm_size: 2gb
     environment:
       PBF_PATH: /data/giss-core-latest.osm.pbf
@@ -150,6 +158,8 @@ services:
     profiles: ["advanced"]
     image: ghcr.io/valhalla/valhalla-scripted@sha256:3d7a08f7e78b356ee873b61711b743ad81bcc114b0ca5731217da8bba6ba39d1
     container_name: giss-valhalla
+    mem_limit: 2g
+    cpus: 3
     environment:
       use_tiles_ignore_pbf: "${VALHALLA_IGNORE_PBF:-True}"
       force_rebuild: "${VALHALLA_FORCE_REBUILD:-False}"
@@ -162,6 +172,7 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - ${VALHALLA_DATA_PATH:-../products/routing/valhalla}:/custom_files
+      - ../products/elevation:/custom_files/elevation_data
     expose:
       - "8002"
     healthcheck:
@@ -176,6 +187,8 @@ services:
     profiles: ["advanced"]
     image: ghcr.io/kiwix/kiwix-serve@sha256:57baa553c46cd30770905df15a9a687258aa5471c30c8edaefe278f1784e1aa8
     container_name: giss-kiwix
+    mem_limit: 512m
+    cpus: 1
     command: ["--urlRootLocation=/wiki", "--blockexternal", "wikipedia_zh_all_mini_2026-05.zim", "wikivoyage_zh_all_maxi_2026-06.zim"]
     environment:
       PORT: "8080"
@@ -195,6 +208,8 @@ services:
     profiles: ["advanced"]
     image: overv/openstreetmap-tile-server@sha256:b6a79da39b6d0758368f7c62d22e49dd3ec59e78b194a5ef9dee2723b1f3fa79
     container_name: giss-osm-carto
+    mem_limit: 3g
+    cpus: 3
     shm_size: 1gb
     command: ["run"]
     environment:
@@ -219,6 +234,8 @@ services:
   web:
     image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     container_name: giss-web
+    mem_limit: 256m
+    cpus: 1
     depends_on:
       martin:
         condition: service_healthy

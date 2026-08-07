@@ -136,8 +136,12 @@ fs.mkdirSync(outputDir, { recursive: true });
   if (await page.locator('[data-local-resource="map-build-staging"]').count()) {
     throw new Error("Empty staging resources should not appear in the Local tab.");
   }
-  if (await page.locator('[data-local-resource="terrain"] [data-local-maintenance]').count()) {
-    throw new Error("Read-only elevation grids incorrectly expose a destructive maintenance action.");
+  const terrainMaintenance = page.locator('[data-local-resource="terrain"] [data-local-maintenance="terrain"]');
+  if (await terrainMaintenance.count() !== 1 || !(await terrainMaintenance.textContent()).includes("同步")) {
+    throw new Error("Elevation grids do not expose their non-destructive synchronization action.");
+  }
+  if (await terrainMaintenance.locator('[data-lucide="trash-2"]').count()) {
+    throw new Error("Elevation synchronization is incorrectly presented as a destructive action.");
   }
   if (await page.locator('[data-local-resource="osm-carto-renderer"]').count() !== 1) {
     throw new Error("The local OSM Carto renderer is missing from Local resources.");

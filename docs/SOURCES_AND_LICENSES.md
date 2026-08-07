@@ -89,13 +89,15 @@ Role: imports `giss-core-latest.osm.pbf` for full local address search and rever
 
 Project: `https://github.com/valhalla/valhalla`
 
-Role: builds and serves local driving, cycling, and walking graph tiles from the shared OSM PBF. The scripted image is pinned by digest. Its downloaded HGT/SRTM-compatible tiles are stored under `products/routing/valhalla/elevation_data` and used for route elevation and terrain rendering. Preserve source provenance and review the elevation provider's terms before redistributing a kit outside personal use.
+Role: builds and serves local driving, cycling, and walking graph tiles from the shared OSM PBF. The scripted image is pinned by digest. HGT/SRTM-compatible tiles are retained independently under `products/elevation` and used for route elevation and terrain rendering.
+
+Regional HGT grids are synchronized from the [AWS Open Data Terrain Tiles registry](https://registry.opendata.aws/terrain-tiles/) using the Mapzen Skadi layout. The source is global, while this installation downloads and retains the bounds of installed map regions so storage grows deliberately. Preserve source provenance and review the dataset terms before redistributing a kit outside personal use.
 
 ## Natural Earth
 
 Source: `https://www.naturalearthdata.com/`
 
-Role: global low-zoom raster, country outlines, and major-place labels. Natural Earth data is public domain; the installed files and checksums are recorded in `web/assets/overview/overview.manifest.json`.
+Role: the legacy low-zoom raster plus the zoom 0-7 multiscale vector PMTiles. The vector build switches between 110m, 50m, and 10m land, water, country/state boundaries, populated places, major roads, railways, rivers, urban areas, ice, and protected areas. Natural Earth data is public domain; the installed files and checksums are recorded in `web/assets/overview/overview.manifest.json`.
 
 ## Open-Meteo
 
